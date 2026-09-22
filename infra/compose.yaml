@@ -6,34 +6,59 @@ services:
       POSTGRES_PASSWORD: livepulse
       POSTGRES_DB: livepulse
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U livepulse -d livepulse"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
   api:
+    image: medical-livepulse-api:local
     build:
       context: ../backend
       dockerfile: Dockerfile.api
-    env_file: ../.env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://livepulse:livepulse@db:5432/livepulse
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     depends_on:
-      - db
+      db:
+        condition: service_healthy
+
+  web:
+    image: medical-livepulse-web:local
+    build:
+      context: ../apps/mobile
+      dockerfile: Dockerfile
+    ports:
+      - "127.0.0.1:8080:80"
+    depends_on:
+      api:
+        condition: service_healthy
 
   monitor:
+    image: medical-livepulse-monitor:local
+    profiles: ["pending-implementation"]
     build:
       context: ../backend
       dockerfile: Dockerfile.monitor
-    env_file: ../.env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://livepulse:livepulse@db:5432/livepulse
     depends_on:
       - db
       - api
 
   worker:
+    image: medical-livepulse-worker:local
+    profiles: ["pending-implementation"]
     build:
       context: ../backend
       dockerfile: Dockerfile.worker
-    env_file: ../.env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://livepulse:livepulse@db:5432/livepulse
     depends_on:
       - db
 

@@ -1,7 +1,7 @@
 from fastapi import Depends, FastAPI, Header
 from pydantic import BaseModel
 
-from ..modules.shifts.service import check_in, check_out
+from ..modules.shifts.service import check_in, check_out, require_account, unavailable
 from ..shared.auth import get_current_user
 
 app = FastAPI(title="LivePulse API", version="0.1.0")
@@ -20,8 +20,8 @@ async def health():
 
 @app.get("/v1/shifts/active")
 async def active_shift(account_id: str, user=Depends(get_current_user)):
-    # TODO: query real por account_id
-    return {"account_id": account_id, "active": None}
+    require_account(account_id, user)
+    unavailable()
 
 
 @app.post("/v1/shifts/check-in", status_code=201)

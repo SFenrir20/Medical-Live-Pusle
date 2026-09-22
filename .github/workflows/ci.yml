@@ -1,12 +1,22 @@
-name: ci
+name: LivePulse CI
+
 on:
   pull_request:
   push:
     branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   backend:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     services:
       postgres:
         image: postgres:16
@@ -14,34 +24,83 @@ jobs:
           POSTGRES_USER: livepulse
           POSTGRES_PASSWORD: livepulse
           POSTGRES_DB: livepulse
-        ports: ["5432:5432"]
+        ports: ['5432:5432']
         options: >-
           --health-cmd "pg_isready -U livepulse"
           --health-interval 5s --health-timeout 5s --health-retries 10
+    defaults:
+      run:
+        working-directory: backend
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
-        with: { python-version: "3.11" }
-      - run: pip install -e ./backend[dev]
-        working-directory: .
+        with:
+          python-version: '3.11'
+      - run: python -m pip install -e '.[dev]'
       - run: ruff check src tests
-        working-directory: backend
-      - run: pytest -q
-        working-directory: backend
+      - run: pytest -q --junitxml=test-results.xml
         env:
           DATABASE_URL: postgresql+asyncpg://livepulse:livepulse@localhost:5432/livepulse
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: backend-test-results
+          path: backend/test-results.xml
 
   mobile:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: apps/mobile
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
-        with: { node-version: 20 }
-      - run: npm ci
-        working-directory: apps/mobile
-      - run: npm run lint --if-present
-        working-directory: apps/mobile
-      - run: npm run typecheck --if-present
-        working-directory: apps/mobile
-      - run: npm test -- --ci
-        working-directory: apps/mobile
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: apps/mobile/package-lock.json
+      - run: npm ci --no-audit --no-fund
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test -- --ci --maxWorkers=2
+      - run: npx expo install --check
+      - run: npx expo export --platform web --max-workers 2
+      - uses: actions/upload-artifact@v4
+        with:
+          name: livepulse-web
+          path: apps/mobile/dist
+          if-no-files-found: error
+
+  docker:
+    needs: [backend, mobile]
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate Compose
+        run: docker compose -f infra/compose.yaml config --quiet
+      - name: Build all images
+        run: docker compose -f infra/compose.yaml --profile pending-implementation build
+      - name: Start implemented services
+        run: docker compose -f infra/compose.yaml up -d --wait --wait-timeout 120
+      - name: Verify HTTP and database
+        run: |
+          python infra/smoke.py
+          docker compose -f infra/compose.yaml exec -T db psql -U livepulse -d livepulse -v ON_ERROR_STOP=1 -c 'SELECT 1;'
+      - name: Export Docker images
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        run: docker save medical-livepulse-api:local medical-livepulse-web:local medical-livepulse-monitor:local medical-livepulse-worker:local | gzip > livepulse-images.tar.gz
+      - uses: actions/upload-artifact@v4
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        with:
+          name: livepulse-docker-images
+          path: livepulse-images.tar.gz
+          retention-days: 7
+          compression-level: 0
+      - name: Service logs
+        if: always()
+        run: docker compose -f infra/compose.yaml logs --no-color
+      - name: Stop isolated CI stack
+        if: always()
+        run: docker compose -f infra/compose.yaml down -v

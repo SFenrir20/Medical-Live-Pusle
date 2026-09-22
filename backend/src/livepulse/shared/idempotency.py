@@ -1,7 +1,6 @@
 """Idempotencia por Idempotency-Key para entrada/salida/relevo."""
+
 from sqlalchemy import Column, DateTime, String, func
-from sqlalchemy.dialects.postgresql import UUID
-import uuid
 
 from ..shared.db import Base
 

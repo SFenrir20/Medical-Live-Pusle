@@ -1,4 +1,5 @@
 """Monitor TikTok: una task por account_id con reconexion propia."""
+
 import asyncio
 
 
@@ -11,7 +12,7 @@ async def monitor_account(account_id: str):
             break
 
 
-async def main(accounts: list[str] = ["medical", "medical-2"]):
+async def main(accounts: tuple[str, ...] = ("medical", "medical-2")):
     await asyncio.gather(*(monitor_account(a) for a in accounts))
 
 

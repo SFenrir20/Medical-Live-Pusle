@@ -1,6 +1,20 @@
 appId: com.livepulse.mobile
 ---
 - launchApp
-- tapOn: "Marcar entrada"
-- tapOn: "Entrada Medical"
-- assertVisible: "confirmed|error|sending"
+# Recorrido demo, no prueba un relevo ni persistencia del backend.
+- tapOn: "Correo electrónico"
+- inputText: "andrea@livepulse.com"
+- tapOn: "Contraseña"
+- inputText: "123456"
+- hideKeyboard
+- scrollUntilVisible:
+    element: "INICIAR SESIÓN"
+    direction: DOWN
+- tapOn: "INICIAR SESIÓN"
+- assertVisible: "Hola, Andrea.*"
+- tapOn: "@medical.cirugias2"
+- scrollUntilVisible:
+    element: "MARCAR INICIO"
+    direction: DOWN
+- tapOn: "MARCAR INICIO"
+- assertVisible: ".*No se ha registrado una entrada.*"
