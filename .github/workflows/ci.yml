@@ -22,7 +22,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: "3.11" }
-      - run: pip install -e backendProj=`pwd`/backend 2>/dev/null || pip install -e ./backend[dev]
+      - run: pip install -e ./backend[dev]
         working-directory: .
       - run: ruff check src tests
         working-directory: backend
@@ -37,7 +37,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with: { node-version: 20 }
-      - run: npm ci || npm install
+      - run: npm ci
         working-directory: apps/mobile
       - run: npm run lint --if-present
         working-directory: apps/mobile
