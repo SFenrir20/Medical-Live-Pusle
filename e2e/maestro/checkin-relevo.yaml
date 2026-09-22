@@ -1,0 +1,6 @@
+appId: com.livepulse.mobile
+---
+- launchApp
+- tapOn: "Marcar entrada"
+- tapOn: "Entrada Medical"
+- assertVisible: "confirmed|error|sending"

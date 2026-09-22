@@ -1,0 +1,8 @@
+{
+  "expo": {
+    "name": "LivePulse",
+    "slug": "livepulse",
+    "scheme": "livepulse",
+    "plugins": ["expo-router"]
+  }
+}

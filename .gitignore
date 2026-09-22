@@ -1,0 +1,8 @@
+.env
+__pycache__/
+.venv/
+node_modules/
+.expo/
+dist/
+.pytest_cache/
+.ruff_cache/

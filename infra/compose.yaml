@@ -1,0 +1,41 @@
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: livepulse
+      POSTGRES_PASSWORD: livepulse
+      POSTGRES_DB: livepulse
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  api:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile.api
+    env_file: ../.env
+    ports:
+      - "8000:8000"
+    depends_on:
+      - db
+
+  monitor:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile.monitor
+    env_file: ../.env
+    depends_on:
+      - db
+      - api
+
+  worker:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile.worker
+    env_file: ../.env
+    depends_on:
+      - db
+
+volumes:
+  pgdata:
