@@ -2,7 +2,7 @@
 
 ## Alcance
 
-Carpeta revisada: `C:\Users\USUARIO\Desktop\Medical LivePulse`.
+Carpeta revisada: raíz del repo.
 Es un esqueleto Expo y FastAPI, no la exportación del diseño mostrado en Lovable.
 
 ## Verificado

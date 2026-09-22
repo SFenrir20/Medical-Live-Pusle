@@ -2,7 +2,7 @@
 
 ## Origen y destino
 
-- Origen leído, sin modificaciones: `C:\Users\USUARIO\Desktop\livepulse-proyecto`.
+- Origen leído, sin modificaciones: carpeta de diseño de origen (no versionada).
 - Destino: `apps/mobile` en Medical LivePulse.
 - El origen es React 19 + TanStack Start + Tailwind, con autenticación simulada.
 - Se adaptaron sus pantallas a React Native y Expo Router; no se copiaron dependencias DOM ni servidor TanStack.
@@ -22,7 +22,7 @@ marcador demo; al implementar tokens reales debe definirse su almacenamiento seg
 
 - Usuarios independientes para LivePulse.
 - Cuentas: `@medical.cirugias` (id interno medical), `@medical.cirugias2` (id interno medical-2).
-- Medical 360: `C:\Users\USUARIO\Desktop\reportes_streamlit`.
+- Medical 360: proyecto externo (no versionado aquí).
 
 ## Punto de integración Medical 360
 
