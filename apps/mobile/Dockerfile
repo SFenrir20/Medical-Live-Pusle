@@ -1,6 +1,10 @@
-FROM node:20-bookworm-slim AS build
+FROM node:22-bookworm-slim AS build
 WORKDIR /app
 ENV CI=1
+ARG EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY
+ARG EXPO_PUBLIC_API_URL=/api
+ENV EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY=$EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY
+ENV EXPO_PUBLIC_API_URL=$EXPO_PUBLIC_API_URL
 COPY package.json package-lock.json ./
 RUN npm ci --no-audit --no-fund
 COPY . .

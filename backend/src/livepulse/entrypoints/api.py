@@ -1,10 +1,21 @@
 from fastapi import Depends, FastAPI, Header
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from ..modules.shifts.service import check_in, check_out, require_account, unavailable
 from ..shared.auth import get_current_user
+from ..shared.config import settings
 
 app = FastAPI(title="LivePulse API", version="0.1.0")
+app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins,
+                   allow_methods=["GET", "POST"],
+                   allow_headers=["Authorization", "Content-Type", "Idempotency-Key"])
+
+
+@app.get("/v1/me")
+def me(user=Depends(get_current_user)):
+    return user
+
 
 
 class CheckInBody(BaseModel):

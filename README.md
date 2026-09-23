@@ -1,15 +1,15 @@
 # Medical LivePulse
 
-Plataforma para gestión de turnos y métricas de transmisiones en vivo.
+Plataforma para gestiÃ³n de turnos y mÃ©tricas de transmisiones en vivo.
 
-Prototipo en desarrollo: aún sin autenticación real ni persistencia de turnos.
+Prototipo en desarrollo: aÃºn sin autenticaciÃ³n real ni persistencia de turnos.
 
 ## Estructura
 
-- `apps/mobile`: aplicación móvil
+- `apps/mobile`: aplicaciÃ³n mÃ³vil
 - `backend`: API y servicios
 - `infra`: infraestructura
 - `e2e`: pruebas de recorrido
-- `docs`: documentación
+- `docs`: documentaciÃ³n
 
-Ver `docs/dev-local.md` para ejecución y verificación en entorno de desarrollo.
+Ver `docs/dev-local.md` para ejecuciÃ³n y verificaciÃ³n en entorno de desarrollo.

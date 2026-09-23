@@ -23,7 +23,9 @@ def test_check_in_requiere_auth():
     assert r.status_code in (401, 403)
 
 
-def test_arbitrary_token_is_not_an_authenticated_user():
+def test_arbitrary_token_is_not_an_authenticated_user(monkeypatch):
+    from livepulse.shared.config import settings
+    monkeypatch.setattr(settings, "clerk_issuer", "")
     r = client.post(
         "/v1/shifts/check-in",
         json={"account_id": "medical"},

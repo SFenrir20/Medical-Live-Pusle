@@ -22,6 +22,9 @@ services:
       dockerfile: Dockerfile.api
     environment:
       DATABASE_URL: postgresql+asyncpg://livepulse:livepulse@db:5432/livepulse
+      CLERK_ISSUER: ${CLERK_ISSUER:-}
+      CLERK_AUTHORIZED_PARTIES: ${CLERK_AUTHORIZED_PARTIES:-[]}
+      LIVEPULSE_USER_ACCOUNTS: ${LIVEPULSE_USER_ACCOUNTS:-null}
     ports:
       - "127.0.0.1:8000:8000"
     depends_on:
@@ -33,6 +36,9 @@ services:
     build:
       context: ../apps/mobile
       dockerfile: Dockerfile
+      args:
+        EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY: ${EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY:-}
+        EXPO_PUBLIC_API_URL: /api
     ports:
       - "127.0.0.1:8080:80"
     depends_on:
