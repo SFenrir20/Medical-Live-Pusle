@@ -47,12 +47,13 @@ services:
 
   monitor:
     image: medical-livepulse-monitor:local
-    profiles: ["pending-implementation"]
+    profiles: ["pending-implementation"]  # activar cuando exista migracion de broadcasts/raw_events
     build:
       context: ../backend
       dockerfile: Dockerfile.monitor
     environment:
       DATABASE_URL: postgresql+asyncpg://livepulse:livepulse@db:5432/livepulse
+      TIKTOK_ACCOUNTS: ${TIKTOK_ACCOUNTS:-{"medical": "medical.cirugias", "medical-2": "medical.cirugias2"}}
     depends_on:
       - db
       - api
