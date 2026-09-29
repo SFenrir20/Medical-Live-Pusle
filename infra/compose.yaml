@@ -45,6 +45,19 @@ services:
       api:
         condition: service_healthy
 
+  migrate:
+    image: medical-livepulse-api:local
+    profiles: ["tools"]
+    build:
+      context: ../backend
+      dockerfile: Dockerfile.api
+    environment:
+      DATABASE_URL: postgresql+asyncpg://livepulse:livepulse@db:5432/livepulse
+    depends_on:
+      db:
+        condition: service_healthy
+    command: ["python", "-m", "alembic", "upgrade", "head"]
+
   monitor:
     image: medical-livepulse-monitor:local
     profiles: ["pending-implementation"]  # activar cuando exista migracion de broadcasts/raw_events

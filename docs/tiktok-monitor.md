@@ -26,6 +26,18 @@ lógica (la lógica se prueba con eventos simulados en CI).
 
 ## Pendiente
 
-- Migración Alembic de `broadcasts`/`raw_events` (modelos listos).
+- Migración de jornadas: crear turnos + restricción de un turno abierto
+  por cuenta cuando los modelos estén definidos.
 - Worker: conciliación LIVE↔turno y métricas sobre eventos procesados.
-- Activar `monitor`/`worker` en Compose (quitar perfil) tras la migración.
+- Activar `monitor`/`worker` en Compose (quitar perfil) tras validar
+  la migración contra Postgres.
+
+## Despliegue
+
+Las migraciones se ejecutan una sola vez, antes de iniciar los
+servicios que las necesitan:
+
+```powershell
+docker compose -f infra/compose.yaml --profile tools run --rm migrate
+docker compose -f infra/compose.yaml up -d
+```

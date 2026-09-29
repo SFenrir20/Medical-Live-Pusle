@@ -41,6 +41,25 @@ jobs:
       - run: pytest -q --junitxml=test-results.xml
         env:
           DATABASE_URL: postgresql+asyncpg://livepulse:livepulse@localhost:5432/livepulse
+      - name: Migrate empty database and verify tables
+        run: |
+          python -m alembic upgrade head
+          python -m alembic check
+          python - <<'EOF'
+          import asyncio, sys
+          sys.path.insert(0, 'src')
+          from sqlalchemy import text
+          from livepulse.shared.db import SessionLocal
+          async def main():
+              async with SessionLocal() as s:
+                  rows = (await s.execute(text(
+                      "SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY 1"))).scalars().all()
+                  print("tables:", rows)
+                  assert {"broadcasts", "raw_events", "idempotency_keys"} <= set(rows), rows
+          asyncio.run(main())
+          EOF
+        env:
+          DATABASE_URL: postgresql+asyncpg://livepulse:livepulse@localhost:5432/livepulse
       - uses: actions/upload-artifact@v4
         if: always()
         with:
