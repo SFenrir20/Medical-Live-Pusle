@@ -32,18 +32,22 @@ pública y la URL de API: cambiar estas variables requiere recompilar.
 
 ## Aprobación y permisos
 
-Un usuario autenticado sin asignación recibe `/v1/me` con `status=pending` y
-`accounts=[]`; no puede consultar ni marcar turnos. Por ahora el operador asigna
-usuarios desde la configuración del servidor, usando el ID `user_...` que muestra Clerk:
+Acceso automático: toda usuaria registrada recibe `default_accounts`
+(`medical` y `medical-2`) y `/v1/me` responde `status=approved`. Ella
+elige la cuenta al marcar entrada, sin intervención del admin.
+
+Para restringir o revocar a alguien se usa la excepción por usuario
+(con el ID `user_...` que muestra Clerk):
 
 ```dotenv
-LIVEPULSE_USER_ACCOUNTS={"user_ID_REAL":["medical","medical-2"]}
+LIVEPULSE_USER_ACCOUNTS={"user_ID_REAL":[]}
 ```
 
-Reiniciar la API tras cambiarlo. Una lista vacía revoca el acceso operativo.
-No usar email como ID ni confiar en roles/cuentas enviados por el cliente o en
-metadatos editables por usuarios. El panel de aprobación y la persistencia de
-usuarios/permisos en PostgreSQL quedan pendientes para el módulo de identidad.
+Una lista vacía deja a esa usuaria en `pending` (solo `/v1/me`, turnos
+403). Reiniciar la API tras cambiarlo. No usar email como ID ni confiar
+en roles/cuentas enviados por el cliente o en metadatos editables por
+usuarios. El panel de aprobación y la persistencia de usuarios/permisos
+en PostgreSQL quedan pendientes para el módulo de identidad.
 
 El cierre de sesión termina el acceso en Clerk; no equivale a marcar salida de
 jornada. El backend verifica tokens de corta duración; una revocación de sesión

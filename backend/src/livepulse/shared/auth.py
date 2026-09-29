@@ -40,6 +40,10 @@ def get_current_user(credentials=Depends(security)):
     except jwt.PyJWTError as exc:
         raise HTTPException(401, "Sesión inválida o vencida.",
                             headers={"WWW-Authenticate": "Bearer"}) from exc
-    accounts = settings.livepulse_user_accounts.get(claims["sub"], [])
-    return {"id": claims["sub"], "accounts": accounts,
+    sub = claims["sub"]
+    if sub in settings.livepulse_user_accounts:
+        accounts = settings.livepulse_user_accounts[sub]
+    else:
+        accounts = list(settings.default_accounts)
+    return {"id": sub, "accounts": accounts,
             "status": "approved" if accounts else "pending"}

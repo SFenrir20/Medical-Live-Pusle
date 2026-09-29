@@ -8,8 +8,11 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://livepulse:livepulse@localhost:5432/livepulse"
     clerk_issuer: str = ""
     clerk_authorized_parties: list[str] = []
-    # Operator-managed grants until the identity administration module is implemented.
+    # Excepciones por usuario (override). Lista vacia = acceso revocado.
+    # Quien no aparece aqui recibe `default_accounts` automaticamente.
     livepulse_user_accounts: dict[str, list[Literal["medical", "medical-2"]]] = {}
+    # Acceso automatico: toda registrada elige cuenta sin aprobacion del admin.
+    default_accounts: list[Literal["medical", "medical-2"]] = ["medical", "medical-2"]
     cors_origins: list[str] = []
     # Captura TikTok: account_id interno -> usuario TikTok (sin @).
     tiktok_accounts: dict[str, str] = {"medical": "medical.cirugias", "medical-2": "medical.cirugias2"}
