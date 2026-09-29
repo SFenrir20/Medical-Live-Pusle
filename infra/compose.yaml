@@ -53,7 +53,7 @@ services:
       dockerfile: Dockerfile.monitor
     environment:
       DATABASE_URL: postgresql+asyncpg://livepulse:livepulse@db:5432/livepulse
-      TIKTOK_ACCOUNTS: ${TIKTOK_ACCOUNTS:-{"medical": "medical.cirugias", "medical-2": "medical.cirugias2"}}
+      TIKTOK_ACCOUNTS: '${TIKTOK_ACCOUNTS:-{"medical": "medical.cirugias", "medical-2": "medical.cirugias2"}}'
     depends_on:
       - db
       - api
