@@ -24,26 +24,32 @@ Usar exactamente el Frontend API URL de la misma instancia de la clave pública.
 Los orígenes deben coincidir con el puerto y dominio reales de la web. En producción,
 reemplazar localhost por los dominios HTTPS permitidos y usar una instancia de producción.
 
-4. Desde `backend`: `.venv\Scripts\python -m uvicorn livepulse.entrypoints.api:app --reload`.
+4. Desde `backend`, aplicar `python -m alembic upgrade head` y ejecutar `.venv\Scripts\python -m uvicorn livepulse.entrypoints.api:app --reload`.
 5. Desde `apps/mobile`: `npm ci`, luego `npm run web -- --port 8081`.
 
 Los archivos .env locales están ignorados por Git. El build web incorpora la clave
 pública y la URL de API: cambiar estas variables requiere recompilar.
 
-## Aprobación y permisos
+## Elección de cuenta y permisos
 
-Un usuario autenticado sin asignación recibe `/v1/me` con `status=pending` y
-`accounts=[]`; no puede consultar ni marcar turnos. Por ahora el operador asigna
-usuarios desde la configuración del servidor, usando el ID `user_...` que muestra Clerk:
+Acceso automático: toda usuaria registrada recibe `default_accounts`
+(`medical` y `medical-2`) y `/v1/me` responde `status=approved`. Ella
+elige la cuenta en la pantalla de inicio, sin intervención del admin.
+El selector solo cambia la cuenta elegida en esa pantalla; no inicia un LIVE
+ni registra una jornada. Al salir de la pantalla o recargar debe volver a elegir.
+
+Para restringir o revocar a alguien se usa la excepción por usuario
+(con el ID `user_...` que muestra Clerk):
 
 ```dotenv
-LIVEPULSE_USER_ACCOUNTS={"user_ID_REAL":["medical","medical-2"]}
+LIVEPULSE_USER_ACCOUNTS={"user_ID_REAL":[]}
 ```
 
-Reiniciar la API tras cambiarlo. Una lista vacía revoca el acceso operativo.
-No usar email como ID ni confiar en roles/cuentas enviados por el cliente o en
-metadatos editables por usuarios. El panel de aprobación y la persistencia de
-usuarios/permisos en PostgreSQL quedan pendientes para el módulo de identidad.
+Una lista vacía deja a esa usuaria en `pending` (solo `/v1/me`, turnos
+403); la pantalla muestra "No hay cuentas disponibles". Reiniciar la API tras cambiarlo. No usar email como ID ni confiar
+en roles/cuentas enviados por el cliente o en metadatos editables por
+usuarios. La administración y la persistencia de usuarios/permisos
+en PostgreSQL quedan pendientes para el módulo de identidad.
 
 El cierre de sesión termina el acceso en Clerk; no equivale a marcar salida de
 jornada. El backend verifica tokens de corta duración; una revocación de sesión
@@ -79,9 +85,9 @@ clave de la instancia. CI no crea usuarios ni envía correos reales.
 
 ## Alcance
 
-Integrado: Clerk, protección de pantallas, Bearer token, `/v1/me`, permisos por cuenta.
-Pendiente: persistencia de jornadas, monitor TikTok, métricas y panel de aprobación.
-Las rutas de jornadas autorizadas siguen devolviendo 501, nunca un registro ficticio.
+Integrado: Clerk, protección de pantallas, Bearer token, `/v1/me`, permisos por cuenta,
+entrada/salida, relevo e historial en PostgreSQL. Ver `shifts.md`.
+Pendiente: completar monitor TikTok, conciliación, métricas y administración de permisos.
 
 Referencias: https://clerk.com/docs/expo/getting-started/quickstart
 https://clerk.com/docs/guides/sessions/manual-jwt-verification

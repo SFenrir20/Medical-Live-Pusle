@@ -1,15 +1,15 @@
 # Medical LivePulse
 
-Plataforma para gestiÃ³n de turnos y mÃ©tricas de transmisiones en vivo.
+Aplicación Expo para web, Android e iOS, con autenticación Clerk y API FastAPI.
 
-Prototipo en desarrollo: aÃºn sin autenticaciÃ³n real ni persistencia de turnos.
+Implementado: selección de cuenta TikTok, entrada/salida, relevo e historial propio en PostgreSQL.
+En desarrollo: monitoreo TikTok, conciliación, métricas e integración con Medical 360.
 
 ## Estructura
 
-- `apps/mobile`: aplicaciÃ³n mÃ³vil
-- `backend`: API y servicios
-- `infra`: infraestructura
-- `e2e`: pruebas de recorrido
-- `docs`: documentaciÃ³n
+- `apps/mobile`: aplicación web y móvil.
+- `backend`: API, Alembic y servicios.
+- `infra`: Docker Compose y verificación del despliegue.
+- `docs`: configuración y reglas.
 
-Ver `docs/dev-local.md` para ejecuciÃ³n y verificaciÃ³n en entorno de desarrollo.
+Ver `docs/shifts.md` para el flujo de jornadas y `docs/dokploy-local.md` para desplegar en el servidor de pruebas.

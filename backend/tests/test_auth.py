@@ -39,8 +39,15 @@ def request(token, path="/v1/me"):
     return client.get(path, headers={"Authorization": f"Bearer {token}"})
 
 
-def test_new_user_is_pending_and_cannot_access_shifts(signing):
-    token = signing(accounts=["medical"], role="admin")
+def test_new_user_gets_default_accounts_without_approval(signing):
+    token = signing()
+    assert request(token).json() == {"id": "user_new", "accounts": ["medical", "medical-2"],
+                                     "status": "approved"}
+
+
+def test_explicit_empty_grant_blocks_user(signing, monkeypatch):
+    monkeypatch.setattr(auth.settings, "livepulse_user_accounts", {"user_new": []})
+    token = signing()
     assert request(token).json() == {"id": "user_new", "accounts": [], "status": "pending"}
     assert request(token, "/v1/shifts/active?account_id=medical").status_code == 403
 
