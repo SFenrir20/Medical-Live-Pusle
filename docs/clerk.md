@@ -30,11 +30,13 @@ reemplazar localhost por los dominios HTTPS permitidos y usar una instancia de p
 Los archivos .env locales están ignorados por Git. El build web incorpora la clave
 pública y la URL de API: cambiar estas variables requiere recompilar.
 
-## Aprobación y permisos
+## Elección de cuenta y permisos
 
 Acceso automático: toda usuaria registrada recibe `default_accounts`
 (`medical` y `medical-2`) y `/v1/me` responde `status=approved`. Ella
-elige la cuenta al marcar entrada, sin intervención del admin.
+elige la cuenta en la pantalla de inicio, sin intervención del admin.
+El selector solo cambia la cuenta elegida en esa pantalla; no inicia un LIVE
+ni registra una jornada. Al salir de la pantalla o recargar debe volver a elegir.
 
 Para restringir o revocar a alguien se usa la excepción por usuario
 (con el ID `user_...` que muestra Clerk):
@@ -44,9 +46,9 @@ LIVEPULSE_USER_ACCOUNTS={"user_ID_REAL":[]}
 ```
 
 Una lista vacía deja a esa usuaria en `pending` (solo `/v1/me`, turnos
-403). Reiniciar la API tras cambiarlo. No usar email como ID ni confiar
+403); la pantalla muestra "No hay cuentas disponibles". Reiniciar la API tras cambiarlo. No usar email como ID ni confiar
 en roles/cuentas enviados por el cliente o en metadatos editables por
-usuarios. El panel de aprobación y la persistencia de usuarios/permisos
+usuarios. La administración y la persistencia de usuarios/permisos
 en PostgreSQL quedan pendientes para el módulo de identidad.
 
 El cierre de sesión termina el acceso en Clerk; no equivale a marcar salida de
@@ -84,7 +86,7 @@ clave de la instancia. CI no crea usuarios ni envía correos reales.
 ## Alcance
 
 Integrado: Clerk, protección de pantallas, Bearer token, `/v1/me`, permisos por cuenta.
-Pendiente: persistencia de jornadas, monitor TikTok, métricas y panel de aprobación.
+Pendiente: persistencia de jornadas, monitor TikTok, métricas y administración de permisos.
 Las rutas de jornadas autorizadas siguen devolviendo 501, nunca un registro ficticio.
 
 Referencias: https://clerk.com/docs/expo/getting-started/quickstart
