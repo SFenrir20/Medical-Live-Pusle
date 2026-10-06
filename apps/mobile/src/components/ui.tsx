@@ -12,8 +12,8 @@ export function Brand() {
 }
 export function Card({ children }: PropsWithChildren) { return <View style={s.card}>{children}</View>; }
 export function Footer() { return <Text style={s.footer}>LivePulse · Gestión de transmisiones</Text>; }
-export function Button({ title, onPress, busy = false }: { title: string; onPress: () => void; busy?: boolean }) {
- return <Pressable accessibilityRole="button" accessibilityState={{ disabled: busy, busy }} disabled={busy} onPress={onPress} style={({ pressed }) => [s.button, (pressed || busy) && { opacity: 0.65 }]}>{busy ? <ActivityIndicator color="white" /> : <Text style={s.buttonText}>{title}</Text>}</Pressable>;
+export function Button({ title, onPress, busy = false, disabled = false }: { title: string; onPress: () => void; busy?: boolean; disabled?: boolean }) {
+ return <Pressable accessibilityRole="button" accessibilityState={{ disabled: busy || disabled, busy }} disabled={busy || disabled} onPress={onPress} style={({ pressed }) => [s.button, (pressed || busy || disabled) && { opacity: 0.65 }]}>{busy ? <ActivityIndicator color="white" /> : <Text style={s.buttonText}>{title}</Text>}</Pressable>;
 }
 export function Field({ label, ...props }: TextInputProps & { label: string }) {
  return <View style={s.field}><Text style={s.label}>{label}</Text><TextInput accessibilityLabel={label} placeholderTextColor="#94a3b8" {...props} style={[s.input, props.style]} /></View>;
