@@ -21,7 +21,7 @@ de puertos de Dokploy. No basta con reiniciar el contenedor anterior.
 Abrir `http://192.168.1.50:8090` desde la misma red. Comprobar
 `http://192.168.1.50:8090/api/health`, que debe devolver `{"ok":true}`.
 
-Desde la terminal del contenedor `api`, aplicar y verificar las migraciones:
+La imagen API aplica las migraciones antes de iniciar. Desde la terminal del contenedor `api`, verificar que la revisión sea `0002 (head)`; también se pueden aplicar manualmente:
 
 ```sh
 python -m alembic upgrade head

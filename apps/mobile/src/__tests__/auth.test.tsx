@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react-nativ
 import { Text as MockText, View as MockView } from 'react-native';
 import Home from '../../app/home';
 import Login from '../../app/index';
+import History from '../../app/history';
 import { getProfile, checkIn } from '../services/api';
 
 const mockToken = jest.fn().mockResolvedValue('signed-token');
@@ -11,14 +12,19 @@ let mockSignedIn = false;
 jest.mock('@clerk/expo/hosted-auth', () => ({ useHostedAuth: () => ({ startHostedAuth: mockHosted }) }));
 jest.mock('../features/auth/session', () => ({ useSession: () => ({ ready: true, signedIn: mockSignedIn, getToken: mockToken, logout: mockLogout, name: 'Ana' }) }));
 jest.mock('expo-router', () => ({
+ useFocusEffect: (callback: () => void) => {
+   const React = jest.requireActual('react');
+   React.useEffect(callback, [callback]);
+ },
  Redirect: ({ href }: { href: string }) => <MockText>redirect:{href}</MockText>,
  Link: ({ children }: { children: React.ReactNode }) => <MockText>{children}</MockText>,
 }));
 jest.mock('react-native-safe-area-context', () => ({ SafeAreaView: ({ children }: { children: React.ReactNode }) => <MockView>{children}</MockView> }));
 const mockFetch = jest.fn();
+jest.mock('expo-crypto', () => ({ getRandomBytes: () => new Uint8Array(16).fill(7) }));
 beforeEach(() => {
- jest.clearAllMocks(); mockSignedIn = false; global.fetch = mockFetch;
- mockFetch.mockResolvedValue({ ok: true, json: async () => ({ id: 'user_1', status: 'approved', accounts: ['medical', 'medical-2'] }) });
+ jest.clearAllMocks(); mockFetch.mockReset(); mockSignedIn = false; global.fetch = mockFetch;
+ mockFetch.mockImplementation(async (url: string) => ({ ok: true, json: async () => url.includes('/v1/me') ? { id: 'user_1', status: 'approved', accounts: ['medical', 'medical-2'] } : null }));
 });
 
 test('protected screen redirects without requesting data', () => {
@@ -44,8 +50,8 @@ test('new user can choose either TikTok account without approval', async () => {
  fireEvent.press(second);
  expect(screen.getByRole('radio', { name: '@medical.cirugias' }).props.accessibilityState.checked).toBe(false);
  expect(screen.getByRole('radio', { name: '@medical.cirugias2' }).props.accessibilityState.checked).toBe(true);
- expect(screen.getByText('Cuenta elegida para tu LIVE')).toBeTruthy();
- expect(mockFetch).toHaveBeenCalledTimes(1);
+ await screen.findByText('MARCAR ENTRADA');
+ expect(mockFetch.mock.calls.every(([, init]) => init.method !== 'POST')).toBe(true);
  expect(screen.queryByText('Acceso pendiente de aprobación')).toBeNull();
  expect(mockFetch).toHaveBeenCalledWith(expect.stringContaining('/v1/me'), expect.objectContaining({ headers: { Authorization: 'Bearer signed-token' } }));
  fireEvent.press(screen.getByText('Cerrar sesión'));
@@ -60,11 +66,11 @@ test('only assigned TikTok accounts appear', async () => {
 });
 test('missing token cannot call API or check in', async () => {
  await expect(getProfile(null)).rejects.toThrow('Inicia sesión');
- await expect(checkIn('medical', null)).rejects.toThrow('Inicia sesión');
+ await expect(checkIn('medical', null, 'key')).rejects.toThrow('Inicia sesión');
  expect(mockFetch).not.toHaveBeenCalled();
 });
 test('API failure shows retry instead of approval or fake data', async () => {
- mockSignedIn = true; mockFetch.mockResolvedValue({ ok: false, status: 503 });
+ mockSignedIn = true; mockFetch.mockResolvedValue({ ok: false, status: 503, json: async () => null });
  render(<Home />); await screen.findByText('REINTENTAR');
  expect(screen.queryByText('Acceso pendiente de aprobación')).toBeNull();
 });
@@ -86,4 +92,90 @@ test('leaving the screen clears the account choice', async () => {
  render(<Home />);
  const radio = await screen.findByRole('radio', { name: '@medical.cirugias2' });
  expect(radio.props.accessibilityState.checked).toBe(false);
+});
+
+const openShift = { id: 'shift-1', account_id: 'medical', user_id: 'user_1',
+ started_at: '2026-10-06T19:00:00+00:00', ended_at: null, end_reason: null, closed_by: null };
+function server(initial: typeof openShift | null = null) {
+ let active: any = initial;
+ mockFetch.mockImplementation(async (url: string, init: RequestInit) => {
+   if (url.includes('/v1/me')) return { ok: true, json: async () => ({ id: 'user_1', status: 'approved', accounts: ['medical', 'medical-2'] }) };
+   if (url.includes('/active')) return { ok: true, json: async () => active };
+   if (url.includes('/check-in')) {
+     active = { ...openShift, account_id: JSON.parse(init.body as string).account_id };
+     return { ok: true, json: async () => active };
+   }
+   if (url.includes('/check-out')) {
+     active = null;
+     return { ok: true, json: async () => ({ ...openShift, ended_at: '2026-10-06T22:00:00+00:00', end_reason: 'manual' }) };
+   }
+   throw new Error('Unexpected request');
+ });
+}
+async function selectFirst() {
+ mockSignedIn = true; render(<Home />);
+ fireEvent.press(await screen.findByRole('radio', { name: '@medical.cirugias' }));
+}
+test('entry is explicit, persists after remount, and exit needs confirmation', async () => {
+ server(); await selectFirst();
+ fireEvent.press(await screen.findByText('MARCAR ENTRADA'));
+ await screen.findByText('Tu turno está abierto');
+ expect(mockFetch).toHaveBeenCalledWith(expect.stringContaining('/check-in'), expect.objectContaining({ method: 'POST', body: JSON.stringify({ account_id: 'medical', replace_shift_id: null }) }));
+ screen.unmount();
+ await selectFirst();
+ await screen.findByText('Tu turno está abierto');
+ fireEvent.press(screen.getByText('MARCAR SALIDA'));
+ expect(mockFetch.mock.calls.filter(([url]) => url.includes('/check-out'))).toHaveLength(0);
+ fireEvent.press(screen.getByText('CONFIRMAR SALIDA'));
+ await screen.findByText('MARCAR ENTRADA');
+ expect(mockFetch).toHaveBeenCalledWith(expect.stringContaining('shift_id=shift-1'), expect.objectContaining({ method: 'POST' }));
+});
+test('handover explicitly identifies the observed turn', async () => {
+ server({ ...openShift, user_id: 'another-user' }); await selectFirst();
+ fireEvent.press(await screen.findByText('RELEVAR Y MARCAR ENTRADA'));
+ expect(mockFetch.mock.calls.filter(([, init]) => init.method === 'POST')).toHaveLength(0);
+ fireEvent.press(screen.getByText('CONFIRMAR RELEVO'));
+ await screen.findByText('Tu turno está abierto');
+ expect(mockFetch).toHaveBeenCalledWith(expect.stringContaining('/check-in'), expect.objectContaining({ body: JSON.stringify({ account_id: 'medical', replace_shift_id: 'shift-1' }) }));
+});
+test('lost response retries with the same key and body', async () => {
+ server(); await selectFirst();
+ await screen.findByText('MARCAR ENTRADA');
+ mockFetch.mockRejectedValueOnce(new Error('Conexión interrumpida'));
+ fireEvent.press(screen.getByText('MARCAR ENTRADA'));
+ fireEvent.press(await screen.findByText('REINTENTAR MARCACIÓN'));
+ await screen.findByText('Tu turno está abierto');
+ const posts = mockFetch.mock.calls.filter(([, init]) => init.method === 'POST');
+ expect(posts).toHaveLength(2);
+ expect(posts[0][0]).toEqual(posts[1][0]);
+ expect(posts[0][1].body).toEqual(posts[1][1].body);
+ expect(posts[0][1].headers).toEqual(posts[1][1].headers);
+});
+test('history displays persisted dates and automatic closure reason', async () => {
+ mockSignedIn = true;
+ mockFetch.mockResolvedValue({ ok: true, json: async () => ({ items: [{ ...openShift,
+   ended_at: '2026-10-06T22:00:00+00:00', end_reason: 'handover' }], next_offset: null }) });
+ render(<History />);
+ await screen.findByText('Cierre automático por relevo');
+ expect(screen.getByText('Duración: 3 h 0 min')).toBeTruthy();
+ expect(screen.getByText('@medical.cirugias')).toBeTruthy();
+});
+
+test('a stale turn refreshes state without silently taking over', async () => {
+ server(); await selectFirst();
+ await screen.findByText('MARCAR ENTRADA');
+ mockFetch.mockResolvedValueOnce({ ok: false, status: 409,
+   json: async () => ({ detail: 'El turno cambió. Actualiza antes de marcar o relevar.' }) });
+ fireEvent.press(screen.getByText('MARCAR ENTRADA'));
+ await screen.findByText('El turno cambió. Actualiza antes de marcar o relevar.');
+ await screen.findByText('MARCAR ENTRADA');
+ expect(mockFetch.mock.calls.filter(([, init]) => init.method === 'POST')).toHaveLength(1);
+ expect(screen.queryByText('REINTENTAR MARCACIÓN')).toBeNull();
+});
+test('double tap sends only one entry while the request is pending', async () => {
+ server(); await selectFirst();
+ const button = await screen.findByText('MARCAR ENTRADA');
+ fireEvent.press(button); fireEvent.press(button);
+ await screen.findByText('Tu turno está abierto');
+ expect(mockFetch.mock.calls.filter(([, init]) => init.method === 'POST')).toHaveLength(1);
 });

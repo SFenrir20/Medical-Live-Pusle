@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
-import { Link, Redirect } from 'expo-router';
+import { Redirect } from 'expo-router';
 import { Button, Card, ErrorText, Footer, Screen, s } from '../src/components/ui';
 import { useSession } from '../src/features/auth/session';
 import { accounts } from '../src/features/accounts';
 import { getProfile, Profile } from '../src/services/api';
 import { theme } from '../src/theme';
+import { ShiftCard } from '../src/features/shifts/ShiftCard';
 
 export default function Home() {
   const { ready, signedIn, logout, getToken, name } = useSession();
@@ -92,13 +93,8 @@ export default function Home() {
             </View>
           </Card>
           {selectedAccount && (
-            <Card>
-              <Text style={s.heading}>Cuenta elegida para tu LIVE</Text>
-              <Text style={styles.handle}>{selectedAccount.handle}</Text>
-              <Text style={[s.subtitle, styles.explanation]}>Elegir una cuenta no inicia la transmisión ni registra una entrada. Inicia tu LIVE desde TikTok.</Text>
-              <Text style={[s.subtitle, styles.explanation]}>La marcación de horarios todavía no está disponible.</Text>
-              <Link href="/history" style={s.link}>Ver historial</Link>
-            </Card>
+            <ShiftCard key={selectedAccount.id} accountId={selectedAccount.id}
+              userId={profile!.id} getToken={getToken} />
           )}
         </>
       )}

@@ -1,12 +1,14 @@
-from fastapi import Depends, FastAPI, Header
+from fastapi import Depends, FastAPI, Header, Query
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..modules.shifts.service import check_in, check_out, require_account, unavailable
+from ..modules.shifts import service
 from ..shared.auth import get_current_user
 from ..shared.config import settings
+from ..shared.db import get_session
 
-app = FastAPI(title="LivePulse API", version="0.1.0")
+app = FastAPI(title="LivePulse API", version="0.2.0")
 app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins,
                    allow_methods=["GET", "POST"],
                    allow_headers=["Authorization", "Content-Type", "Idempotency-Key"])
@@ -17,11 +19,9 @@ def me(user=Depends(get_current_user)):
     return user
 
 
-
 class CheckInBody(BaseModel):
-    account_id: str  # medical | medical-2, regla: 1 turno activo por cuenta
-    lat: float | None = None
-    lng: float | None = None
+    account_id: str = Field(min_length=1, max_length=32)
+    replace_shift_id: str | None = Field(default=None, min_length=1, max_length=36)
 
 
 @app.get("/health")
@@ -30,24 +30,36 @@ async def health():
 
 
 @app.get("/v1/shifts/active")
-async def active_shift(account_id: str, user=Depends(get_current_user)):
-    require_account(account_id, user)
-    unavailable()
+async def active_shift(account_id: str, user=Depends(get_current_user),
+                       session: AsyncSession = Depends(get_session)):
+    return await service.active_shift(session, account_id, user)
+
+
+@app.get("/v1/shifts/history")
+async def history(limit: int = Query(default=20, ge=1, le=100),
+                  offset: int = Query(default=0, ge=0), user=Depends(get_current_user),
+                  session: AsyncSession = Depends(get_session)):
+    return await service.history(session, user, limit, offset)
 
 
 @app.post("/v1/shifts/check-in", status_code=201)
 async def api_check_in(
     body: CheckInBody,
-    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
-    user=Depends(get_current_user),
+    idempotency_key: str = Header(alias="Idempotency-Key", min_length=1, max_length=128),
+    user=Depends(get_current_user), session: AsyncSession = Depends(get_session),
 ):
-    return await check_in(account_id=body.account_id, user=user, idempotency_key=idempotency_key)
+    return await service.mark(session=session, account_id=body.account_id, user=user,
+                              idempotency_key=idempotency_key, operation="check-in",
+                              expected_id=body.replace_shift_id)
 
 
-@app.post("/v1/shifts/check-out", status_code=200)
+@app.post("/v1/shifts/check-out")
 async def api_check_out(
     account_id: str,
-    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
-    user=Depends(get_current_user),
+    shift_id: str = Query(min_length=1, max_length=36),
+    idempotency_key: str = Header(alias="Idempotency-Key", min_length=1, max_length=128),
+    user=Depends(get_current_user), session: AsyncSession = Depends(get_session),
 ):
-    return await check_out(account_id=account_id, user=user, idempotency_key=idempotency_key)
+    return await service.mark(session=session, account_id=account_id, user=user,
+                              idempotency_key=idempotency_key, operation="check-out",
+                              expected_id=shift_id)

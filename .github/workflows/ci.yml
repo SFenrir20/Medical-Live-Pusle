@@ -3,7 +3,7 @@ name: LivePulse CI
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [main, developer, deploy]
   workflow_dispatch:
 
 permissions:
@@ -55,7 +55,7 @@ jobs:
                   rows = (await s.execute(text(
                       "SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY 1"))).scalars().all()
                   print("tables:", rows)
-                  assert {"broadcasts", "raw_events", "idempotency_keys"} <= set(rows), rows
+                  assert {"broadcasts", "raw_events", "idempotency_keys", "shifts"} <= set(rows), rows
           asyncio.run(main())
           EOF
         env:
@@ -106,7 +106,7 @@ jobs:
       - name: Verify HTTP and database
         run: |
           python infra/smoke.py
-          docker compose -f infra/compose.yaml exec -T db psql -U livepulse -d livepulse -v ON_ERROR_STOP=1 -c 'SELECT 1;'
+          docker compose -f infra/compose.yaml exec -T db psql -U livepulse -d livepulse -v ON_ERROR_STOP=1 -c 'SELECT count(*) FROM shifts;'
       - name: Export Docker images
         if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
         run: docker save medical-livepulse-api:local medical-livepulse-web:local medical-livepulse-monitor:local medical-livepulse-worker:local | gzip > livepulse-images.tar.gz

@@ -1,53 +1,37 @@
-import sys
-from pathlib import Path
+from fastapi.testclient import TestClient
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
-
-import pytest  # noqa: E402
-from fastapi.testclient import TestClient  # noqa: E402
-
-from livepulse.entrypoints.api import app  # noqa: E402
-from livepulse.shared.auth import get_current_user  # noqa: E402
+from livepulse.entrypoints.api import app
+from livepulse.shared.auth import get_current_user
 
 client = TestClient(app)
 
 
 def test_health():
-    r = client.get("/health")
-    assert r.status_code == 200
-    assert r.json() == {"ok": True}
+    assert client.get("/health").json() == {"ok": True}
 
 
-def test_check_in_requiere_auth():
-    r = client.post("/v1/shifts/check-in", json={"account_id": "medical"})
-    assert r.status_code in (401, 403)
+def test_shift_endpoints_require_auth():
+    assert client.post("/v1/shifts/check-in", json={"account_id": "medical"}).status_code == 401
+    assert client.get("/v1/shifts/history").status_code == 401
+    assert client.get("/v1/shifts/active?account_id=medical").status_code == 401
+    assert client.post("/v1/shifts/check-out?account_id=medical&shift_id=x").status_code == 401
 
 
 def test_arbitrary_token_is_not_an_authenticated_user(monkeypatch):
     from livepulse.shared.config import settings
     monkeypatch.setattr(settings, "clerk_issuer", "")
-    r = client.post(
-        "/v1/shifts/check-in",
-        json={"account_id": "medical"},
-        headers={"Authorization": "Bearer invented-token"},
-    )
-    assert r.status_code == 503
+    assert client.post("/v1/shifts/check-in", json={"account_id": "medical"},
+                       headers={"Authorization": "Bearer invented-token"}).status_code == 503
 
 
-@pytest.mark.parametrize("account,expected", [("medical", 501), ("other", 403)])
-@pytest.mark.parametrize("operation", ["check-in", "check-out", "active"])
-def test_unimplemented_operations_never_confirm_a_shift(account, expected, operation):
-    app.dependency_overrides[get_current_user] = lambda: {
-        "id": "test-user",
-        "accounts": ["medical"],
-    }
+def test_account_authorization_precedes_database_access():
+    app.dependency_overrides[get_current_user] = lambda: {"id": "ana", "accounts": []}
     try:
-        if operation == "check-in":
-            r = client.post("/v1/shifts/check-in", json={"account_id": account})
-        elif operation == "check-out":
-            r = client.post("/v1/shifts/check-out", params={"account_id": account})
-        else:
-            r = client.get("/v1/shifts/active", params={"account_id": account})
-        assert r.status_code == expected
+        headers = {"Idempotency-Key": "key"}
+        assert client.post("/v1/shifts/check-in", json={"account_id": "medical"},
+                           headers=headers).status_code == 403
+        assert client.post("/v1/shifts/check-out?account_id=medical&shift_id=x",
+                           headers=headers).status_code == 403
+        assert client.get("/v1/shifts/active?account_id=medical").status_code == 403
     finally:
         app.dependency_overrides.clear()

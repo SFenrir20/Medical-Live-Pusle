@@ -24,7 +24,7 @@ Usar exactamente el Frontend API URL de la misma instancia de la clave pública.
 Los orígenes deben coincidir con el puerto y dominio reales de la web. En producción,
 reemplazar localhost por los dominios HTTPS permitidos y usar una instancia de producción.
 
-4. Desde `backend`: `.venv\Scripts\python -m uvicorn livepulse.entrypoints.api:app --reload`.
+4. Desde `backend`, aplicar `python -m alembic upgrade head` y ejecutar `.venv\Scripts\python -m uvicorn livepulse.entrypoints.api:app --reload`.
 5. Desde `apps/mobile`: `npm ci`, luego `npm run web -- --port 8081`.
 
 Los archivos .env locales están ignorados por Git. El build web incorpora la clave
@@ -85,9 +85,9 @@ clave de la instancia. CI no crea usuarios ni envía correos reales.
 
 ## Alcance
 
-Integrado: Clerk, protección de pantallas, Bearer token, `/v1/me`, permisos por cuenta.
-Pendiente: persistencia de jornadas, monitor TikTok, métricas y administración de permisos.
-Las rutas de jornadas autorizadas siguen devolviendo 501, nunca un registro ficticio.
+Integrado: Clerk, protección de pantallas, Bearer token, `/v1/me`, permisos por cuenta,
+entrada/salida, relevo e historial en PostgreSQL. Ver `shifts.md`.
+Pendiente: completar monitor TikTok, conciliación, métricas y administración de permisos.
 
 Referencias: https://clerk.com/docs/expo/getting-started/quickstart
 https://clerk.com/docs/guides/sessions/manual-jwt-verification

@@ -43,8 +43,6 @@ def test_new_user_gets_default_accounts_without_approval(signing):
     token = signing()
     assert request(token).json() == {"id": "user_new", "accounts": ["medical", "medical-2"],
                                      "status": "approved"}
-    assert request(token, "/v1/shifts/active?account_id=medical").status_code == 501
-    assert request(token, "/v1/shifts/active?account_id=medical-2").status_code == 501
 
 
 def test_explicit_empty_grant_blocks_user(signing, monkeypatch):
