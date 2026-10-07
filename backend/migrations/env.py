@@ -9,6 +9,7 @@ from alembic import context
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
 # Importar modelos para que registren sus tablas en Base.metadata.
+import livepulse.modules.analytics.models  # noqa: F401
 import livepulse.modules.broadcasts.models  # noqa: F401
 import livepulse.modules.shifts.models  # noqa: F401
 import livepulse.shared.idempotency  # noqa: F401

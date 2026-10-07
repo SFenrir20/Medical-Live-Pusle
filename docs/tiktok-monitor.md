@@ -1,43 +1,23 @@
-# Monitor TikTok
+# Monitor y procesamiento TikTok
 
-Adaptado del script manual (`scraper_tiktok.py`, TikTokLive 7.0.0, solo
-comentarios a CSV) al servicio `backend/.../entrypoints/monitor.py`.
+El perfil Compose `live` inicia un monitor por cuenta y el worker. El arranque depende de la API saludable, que aplica Alembic `0003`.
 
-## Cambios
+- Un bloqueo PostgreSQL por cuenta evita dos monitores del mismo despliegue capturando en paralelo.
+- `(account_id, room_id)` identifica un LIVE; reconectar conserva el registro y su primera hora observada.
+- Una respuesta offline inicia el período de gracia. Solo una nueva respuesta offline después de ese período confirma el fin; un error reinicia la comprobación.
+- Cambiar de sala cierra la anterior como fin no confirmado. Nunca se presenta su hora como una hora exacta emitida por TikTok.
+- Cada evento queda vinculado al LIVE. Se prioriza `common.msg_id` para deduplicar y `common.create_time` para su hora, cuando existen.
+- El worker bloquea lotes con `SKIP LOCKED`, crea hechos de métricas/contactos y marca el evento procesado dentro de la misma transacción. Reintentar no suma otra vez.
+- Los regalos en racha se suman al finalizar la racha. Diamantes no equivalen a dinero ni a ingresos de la clínica.
+- La relación con turnos se consulta por cuenta y hora del evento; los intervalos incluyen el inicio y excluyen el fin. Una entrada tardía no se atribuye retroactivamente.
+- Marketing muestra señal de vida de monitores y worker, eventos pendientes y falta de datos.
 
-- Un monitor por cuenta (`medical`, `medical-2`) con reconexión propia y
-  backoff (2s → 60s). Una caída no detiene la otra cuenta.
-- Eventos: comment, gift, like, share, join, live_end.
-- Todo evento lleva `account_id` + `event_id` único. Reprocesar es no-op
-  (UNIQUE en `raw_events`, `MemorySink`/`PostgresSink`).
-- Desconexión != fin: `DisconnectEvent` solo reintenta. `LiveEndEvent`
-  abre gracia de 120s y solo cierra si el re-chequeo confirma offline.
-
-## Validación manual (LIVE real)
-
-Desde `backend/` con el venv:
-
-```powershell
-.\.venv\Scripts\python.exe -m livepulse.entrypoints.monitor -a medical -t 120 -o debug_medical.csv
+```sh
+docker compose -f infra/compose.yaml --profile live up -d --build
+docker compose -f infra/compose.yaml logs -f monitor worker
 ```
 
-Compara conteo vs pantalla TikTok. Esto valida al proveedor, no la
-lógica (la lógica se prueba con eventos simulados en CI).
+Validar con LIVE reales: ambas cuentas simultáneas, corte de red, siguiente transmisión, reinicio de proceso, mensajes repetidos y un relevo de TikToker. La API externa puede cambiar y no se garantiza recuperar eventos ocurridos durante una interrupción.
 
-## Pendiente
-
-- Migración de jornadas: crear turnos + restricción de un turno abierto
-  por cuenta cuando los modelos estén definidos.
-- Worker: conciliación LIVE↔turno y métricas sobre eventos procesados.
-- Activar `monitor`/`worker` en Compose (quitar perfil) tras validar
-  la migración contra Postgres.
-
-## Despliegue
-
-Las migraciones se ejecutan una sola vez, antes de iniciar los
-servicios que las necesitan:
-
-```powershell
-docker compose -f infra/compose.yaml --profile tools run --rm migrate
-docker compose -f infra/compose.yaml up -d
-```
+Eventos antiguos sin sala identificable permanecen sin vincular. No se incluyen en métricas de un LIVE inventado.
+Ver `phases.md` y `operations.md` para criterios de aceptación, configuración y pendientes externos.

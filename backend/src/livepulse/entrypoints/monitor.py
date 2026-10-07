@@ -12,6 +12,7 @@ import argparse
 import asyncio
 import csv
 import hashlib
+import json
 import os
 import sys
 import warnings
@@ -45,6 +46,9 @@ def provider_msg_id(event) -> str | None:
         value = getattr(event, attr, None)
         if value:
             return str(value)
+    common_id = getattr(getattr(event, "common", None), "msg_id", None)
+    if common_id:
+        return str(common_id)
     data = getattr(event, "data", None)
     if isinstance(data, dict):
         for key in ("msg_id", "message_id", "id"):
@@ -55,7 +59,7 @@ def provider_msg_id(event) -> str | None:
 
 def event_user(event) -> tuple[str, str | None]:
     user = getattr(event, "user", None)
-    unique = getattr(user, "unique_id", None) or getattr(user, "nickname", None) or "desconocido"
+    unique = getattr(user, "id", None) or getattr(user, "unique_id", None) or ""
     nick = getattr(user, "nickname", None)
     return str(unique), (str(nick) if nick else None)
 
@@ -64,14 +68,28 @@ def normalize(kind: str, account_id: str, room_id: str | None, event, text: str 
               extra: dict | None = None) -> dict:
     unique, nick = event_user(event)
     occurred = utcnow()
-    fallback = f"{account_id}|{kind}|{unique}|{text or ''}|{occurred.isoformat(timespec='seconds')}"
+    created = getattr(getattr(event, "common", None), "create_time", None)
+    if created:
+        try:
+            occurred = datetime.fromtimestamp(float(created) / (1000 if float(created) > 1e12 else 1), timezone.utc)
+        except (ValueError, OverflowError, OSError):
+            pass
+    try:
+        raw = bytes(event).hex()
+    except (TypeError, ValueError):
+        raw = json.dumps({"kind": kind, "user": unique, "text": text,
+                          "extra": extra, "created": created}, sort_keys=True)
+    fallback = raw
     return {
         "event_id": build_event_id(account_id, room_id, kind, provider_msg_id(event), fallback),
         "account_id": account_id,
         "broadcast_id": None,
         "type": kind,
         "occurred_at": occurred,
-        "payload": {"user": unique, "nickname": nick, **(extra or {})},
+        "payload": {"user": unique, "nickname": nick,
+                    "username": getattr(getattr(event, "user", None), "unique_id", None),
+                    "dedup_quality": "provider" if provider_msg_id(event) else "fingerprint",
+                    "time_source": "provider" if created else "received", **(extra or {})},
         "raw_text": text,
     }
 
@@ -115,7 +133,11 @@ class BroadcastTracker:
 
 class AccountMonitor:
     def __init__(self, account_id: str, tiktok_username: str, sink: EventSink,
-                 csv_path: str | None = None, timeout_s: int = 0):
+                 csv_path: str | None = None, timeout_s: int = 0, store=None):
+        self.store = store
+        self.broadcast_id = None
+        self.connected = asyncio.Event()
+        self.end_timer = None
         self.account_id = account_id
         self.username = tiktok_username
         self.sink = sink
@@ -136,53 +158,75 @@ class AccountMonitor:
                              event["payload"].get("user"), event.get("raw_text")])
 
     async def _emit(self, event: dict):
-        await self.sink.emit(event)
-        self._csv_append(event)
+        if self.store:
+            await asyncio.wait_for(self.connected.wait(), timeout=30)
+        event["broadcast_id"] = self.broadcast_id
+        if self.store and not self.broadcast_id:
+            raise RuntimeError("Cannot persist event without a LIVE")
+        if await self.sink.emit(event):
+            self._csv_append(event)
 
     def attach(self, client):
         from TikTokLive.events import (
             CommentEvent,
             ConnectEvent,
             DisconnectEvent,
+            FollowEvent,
             GiftEvent,
             JoinEvent,
             LikeEvent,
             LiveEndEvent,
+            RoomUserSeqEvent,
             ShareEvent,
         )
 
         async def on_connect(e):
             self.tracker.on_connect(room_id=getattr(getattr(client, "room", None), "id", None)
                                     or getattr(e, "room_id", None))
+            if self.store:
+                self.broadcast_id = await self.store.connected(
+                    self.account_id, self.tracker.room_id, utcnow())
+            self.connected.set()
             print(f"[+] {self.account_id} (@{self.username}): conectado", flush=True)
 
+        async def emit(kind, event, text=None, extra=None):
+            if self.store:
+                await asyncio.wait_for(self.connected.wait(), timeout=30)
+            await self._emit(normalize(kind, self.account_id, self.tracker.room_id,
+                                       event, text, extra))
+
         async def on_comment(e):
-            await self._emit(normalize("comment", self.account_id, self.tracker.room_id,
-                                       e, getattr(e, "comment", None)))
+            await emit("comment", e, getattr(e, "comment", None))
 
         async def on_gift(e):
             gift = getattr(e, "gift", None)
-            await self._emit(normalize("gift", self.account_id, self.tracker.room_id, e, None, {
+            await emit("gift", e, extra={
                 "gift_name": getattr(gift, "name", None),
-                "diamond_count": getattr(e, "diamond_count", getattr(e, "repeat_end", None)),
+                "diamond_count": getattr(gift, "diamond_count", 0),
+                "repeat_count": getattr(e, "repeat_count", 1),
+                "gift_type": getattr(gift, "type", 0),
                 "repeat_end": getattr(e, "repeat_end", None),
-            }))
+            })
 
         async def on_like(e):
-            await self._emit(normalize("like", self.account_id, self.tracker.room_id, e, None,
-                                       {"count": getattr(e, "count", 1)}))
+            await emit("like", e, extra={"count": getattr(e, "count", 1)})
 
         async def on_share(e):
-            await self._emit(normalize("share", self.account_id, self.tracker.room_id, e, None))
+            await emit("share", e)
 
         async def on_join(e):
-            await self._emit(normalize("join", self.account_id, self.tracker.room_id, e, None))
+            await emit("join", e)
+
+        async def on_follow(e):
+            await emit("follow", e)
+
+        async def on_audience(e):
+            await emit("audience", e, extra={"viewers": getattr(e, "total", None)})
 
         async def on_live_end(e):
-            print(f"[!] {self.account_id}: LiveEnd recibido, espera de gracia...", flush=True)
             self.tracker.on_live_end()
-            await self._emit(normalize("live_end", self.account_id, self.tracker.room_id, e, None))
-            asyncio.get_running_loop().call_later(
+            await emit("live_end", e)
+            self.end_timer = asyncio.get_running_loop().call_later(
                 settings.monitor_end_grace_s + 1, lambda: asyncio.create_task(client.disconnect()))
 
         async def on_disconnect(e):
@@ -194,6 +238,8 @@ class AccountMonitor:
         client.add_listener(GiftEvent, on_gift)
         client.add_listener(LikeEvent, on_like)
         client.add_listener(ShareEvent, on_share)
+        client.add_listener(FollowEvent, on_follow)
+        client.add_listener(RoomUserSeqEvent, on_audience)
         client.add_listener(JoinEvent, on_join)
         client.add_listener(LiveEndEvent, on_live_end)
         client.add_listener(DisconnectEvent, on_disconnect)
@@ -205,27 +251,51 @@ class AccountMonitor:
         delay = settings.monitor_reconnect_base_s
         while not self._stop.is_set():
             client = TikTokLiveClient(unique_id=self.username)
+            self.connected.clear()
             self.attach(client)
+            timeout = None
+            heartbeat = None
             if self.timeout_s:
-                asyncio.get_running_loop().call_later(
+                timeout = asyncio.get_running_loop().call_later(
                     self.timeout_s, lambda c=client: asyncio.create_task(c.disconnect()))
             try:
+                if self.store:
+                    async def beat():
+                        while True:
+                            await self.store.touch(self.account_id, utcnow())
+                            await asyncio.sleep(20)
+                    # Heartbeat reports process activity, never a fabricated LIVE end.
+                    heartbeat = asyncio.create_task(beat())
                 await client.connect(process_connect_events=True, compress_ws_events=True,
                                      fetch_live_check=True)
-                delay = settings.monitor_reconnect_base_s  # exito: resetea backoff
-                if self.tracker.status == "ending" and self.tracker.confirm_end(
-                        recheck_offline=True):
-                    print(f"[+] {self.account_id}: fin de LIVE confirmado.", flush=True)
+                delay = settings.monitor_reconnect_base_s
+                # An actual provider lookup is required after disconnection.
+                live = await client.is_live()
+                if self.store:
+                    await self.store.observed(self.account_id, "reconnecting" if live else "offline",
+                                              utcnow())
+                if self.timeout_s:
                     return
-            except (UserNotFoundError, UserOfflineError) as exc:
-                if self.tracker.status == "ending":
-                    if self.tracker.confirm_end(recheck_offline=True):
-                        print(f"[+] {self.account_id}: fin confirmado (offline).", flush=True)
-                        return
-                print(f"[-] {self.account_id}: offline ({exc}). Reintento en {delay:.0f}s.",
-                      flush=True)
+            except UserOfflineError:
+                if self.store:
+                    await self.store.observed(self.account_id, "offline", utcnow())
+            except UserNotFoundError:
+                if self.store:
+                    await self.store.observed(self.account_id, "error", utcnow(), "UserNotFound")
             except Exception as exc:
-                print(f"[X] {self.account_id}: error {exc}. Reintento en {delay:.0f}s.", flush=True)
+                if self.store:
+                    await self.store.observed(self.account_id, "error", utcnow(), type(exc).__name__)
+                print(f"[X] {self.account_id}: {type(exc).__name__}; retry in {delay}s", flush=True)
+            finally:
+                if timeout:
+                    timeout.cancel()
+                if self.end_timer:
+                    self.end_timer.cancel()
+                    self.end_timer = None
+                if heartbeat:
+                    heartbeat.cancel()
+                    await asyncio.gather(heartbeat, return_exceptions=True)
+                await client.close()
             await asyncio.sleep(delay)
             delay = min(delay * 2, settings.monitor_reconnect_max_s)
 
@@ -235,16 +305,24 @@ class AccountMonitor:
 
 async def main(accounts: tuple[str, ...] | None = None, timeout_s: int = 0,
                csv_prefix: str | None = None):
+    from ..modules.broadcasts.lifecycle import BroadcastStore
     from ..modules.broadcasts.sink import PostgresSink
     from ..shared.db import SessionLocal
 
     mapping = settings.tiktok_accounts
     wanted = accounts or tuple(mapping.keys())
     sink: EventSink = PostgresSink(SessionLocal)
-    monitors = [AccountMonitor(a, mapping[a], sink, timeout_s=timeout_s,
+    store = BroadcastStore(SessionLocal)
+    monitors = [AccountMonitor(a, mapping[a], sink, timeout_s=timeout_s, store=store,
                                csv_path=f"{csv_prefix}_{a}.csv" if csv_prefix else None)
                 for a in wanted if a in mapping]
-    await asyncio.gather(*(m.run_forever() for m in monitors))
+    async def run_owned(monitor):
+        while True:
+            async with store.lease(monitor.account_id) as owned:
+                if owned:
+                    await monitor.run_forever()
+            await asyncio.sleep(30)
+    await asyncio.gather(*(run_owned(m) for m in monitors))
 
 
 def manual_run():

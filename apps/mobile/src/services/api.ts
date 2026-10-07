@@ -49,3 +49,5 @@ export async function getActiveShift(account_id: string, token: string | null): 
 export async function getShiftHistory(token: string | null, offset = 0): Promise<ShiftHistory> {
  return authenticated(`/v1/shifts/history?offset=${offset}`, token);
 }
+
+export const staffRequest = authenticated;

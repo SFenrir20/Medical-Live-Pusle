@@ -3,14 +3,19 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..modules.analytics.api import router as analytics_router
+from ..modules.analytics.ocr import router as ocr_router
 from ..modules.shifts import service
 from ..shared.auth import get_current_user
 from ..shared.config import settings
 from ..shared.db import get_session
 
-app = FastAPI(title="LivePulse API", version="0.2.0")
+app = FastAPI(title="LivePulse API", version="0.3.0")
+app.include_router(analytics_router)
+
+app.include_router(ocr_router)
 app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins,
-                   allow_methods=["GET", "POST"],
+                   allow_methods=["GET", "POST", "PUT", "PATCH"],
                    allow_headers=["Authorization", "Content-Type", "Idempotency-Key"])
 
 

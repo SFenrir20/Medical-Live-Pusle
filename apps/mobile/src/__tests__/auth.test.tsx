@@ -3,6 +3,7 @@ import { AppState, AppStateStatus, Text as MockText, View as MockView } from 're
 import Home from '../../app/home';
 import Login from '../../app/index';
 import History from '../../app/history';
+import Staff from '../../app/staff';
 import { getProfile, checkIn } from '../services/api';
 
 const mockToken = jest.fn().mockResolvedValue('signed-token');
@@ -218,4 +219,25 @@ test('background polling preserves the open confirmation and avoids overlapping 
    await act(async () => { respond({ ok: true, json: async () => openShift }); });
    expect(screen.getByText('CONFIRMAR SALIDA')).toBeTruthy();
  } finally { jest.useRealTimers(); }
+});
+
+
+test('staff registration does not automatically grant privileged screens', async () => {
+ mockSignedIn = true;
+ mockFetch.mockResolvedValue({ ok: true, json: async () => ({ role: 'tiktoker' }) });
+ render(<Staff />);
+ await screen.findByText('Tu registro permite marcar jornadas. Un administrador puede asignarte acceso de Marketing o Atención al Cliente.');
+ expect(screen.queryByText('DESCARGAR CSV PARA LEADSALES')).toBeNull();
+ expect(screen.queryByText('USUARIOS')).toBeNull();
+});
+
+test('care role sees contacts without marketing or role administration', async () => {
+ mockSignedIn = true;
+ mockFetch.mockImplementation(async (url: string) => ({ ok: true, json: async () =>
+   url.includes('/capabilities') ? { role: 'care' } : { items: [], next_offset: null } }));
+ render(<Staff />);
+ await screen.findByText('DESCARGAR CSV PARA LEADSALES');
+ expect(screen.queryByText('MARKETING')).toBeNull();
+ expect(screen.queryByText('USUARIOS')).toBeNull();
+ expect(await screen.findByText('GUARDAR CONTACTO REVISADO')).toBeTruthy();
 });

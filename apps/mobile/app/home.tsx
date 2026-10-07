@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
-import { Redirect } from 'expo-router';
+import { Link, Redirect } from 'expo-router';
 import { Button, Card, ErrorText, Footer, Screen, s } from '../src/components/ui';
 import { useSession } from '../src/features/auth/session';
 import { accounts } from '../src/features/accounts';
@@ -98,6 +98,7 @@ export default function Home() {
           )}
         </>
       )}
+      <Link href="/staff" style={s.link}>Panel del equipo y permisos</Link>
       <Footer />
     </Screen>
   );
