@@ -26,10 +26,10 @@ def recognize(data):
                 image.load()
                 text = pytesseract.image_to_string(image.convert('RGB'), lang='spa+eng', timeout=20)
         return {'text': text[:10000], 'phones': phones_in(text), 'requires_review': True}
-    except (OSError, UnidentifiedImageError, Image.DecompressionBombError, Image.DecompressionBombWarning):
-        raise HTTPException(422, 'No se pudo leer la imagen.') from None
     except pytesseract.TesseractNotFoundError:
         raise HTTPException(503, 'El motor OCR no está instalado en este servidor.') from None
+    except (OSError, UnidentifiedImageError, Image.DecompressionBombError, Image.DecompressionBombWarning):
+        raise HTTPException(422, 'No se pudo leer la imagen.') from None
     except RuntimeError:
         raise HTTPException(422, 'La captura tardó demasiado; recorta el área del comentario.') from None
 

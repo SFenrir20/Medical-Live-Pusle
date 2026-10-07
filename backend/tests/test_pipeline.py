@@ -151,8 +151,6 @@ async def test_roles_and_leadsales_export_are_separated(database):
     assert (await client.get('/v1/analytics/lives')).status_code == 403
     contact = (await client.post('/v1/contacts/manual', json={'text': '+51 987654321',
                                                            'username': '=FORMULA()'})).json()
-    assert (await client.post('/v1/contacts/manual', json={'text': '987654321',
-                                                         'username': 'another'})).json()['id'] == contact['id']
     ready = await client.patch('/v1/contacts/' + contact['id'],
                                json={'status': 'ready', 'expected_status': 'new'})
     assert ready.status_code == 200
@@ -160,6 +158,11 @@ async def test_roles_and_leadsales_export_are_separated(database):
     assert exported.startswith('Area code,Phone,Name,Value,Email,Tags,Company,Assignee')
     assert '51,987654321' in exported and "'=FORMULA()" in exported
     assert len(exported.splitlines()) == 2
+    assert (await client.post('/v1/contacts/manual', json={'text': '987654321',
+                                                         'username': 'another'})).json()['id'] == contact['id']
+    deduplicated = (await client.post('/v1/contacts/export/leadsales')).json()['csv']
+    assert '51,987654321' in deduplicated
+    assert len(deduplicated.splitlines()) == 2
     assert (await client.patch('/v1/contacts/' + contact['id'],
         json={'status': 'closed', 'expected_status': 'new'})).status_code == 409
     async with factory() as s:
