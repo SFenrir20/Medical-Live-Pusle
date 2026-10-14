@@ -31,6 +31,19 @@ def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+async def close_provider(client):
+    """Close only this account's resources inside our existing asyncio loop.
+
+    TikTokLive 7.0.0 close()/connect() use synchronous _clean_tasks(), which
+    calls run_until_complete and cancels unrelated tasks on the shared loop.
+    Use the asynchronous disconnect and HTTP close APIs directly instead.
+    """
+    try:
+        await asyncio.wait_for(client.disconnect(), timeout=10)
+    finally:
+        await asyncio.wait_for(client.web.close(), timeout=10)
+
+
 def build_event_id(
     account_id: str, room_id: str | None, kind: str, provider_id: str | None, fallback: str
 ) -> str:
@@ -266,8 +279,10 @@ class AccountMonitor:
                             await asyncio.sleep(20)
                     # Heartbeat reports process activity, never a fabricated LIVE end.
                     heartbeat = asyncio.create_task(beat())
-                await client.connect(process_connect_events=True, compress_ws_events=True,
-                                     fetch_live_check=True)
+                stream = await client.start(process_connect_events=True, compress_ws_events=True,
+                                            fetch_live_check=True)
+                # Keep shutdown under our control; disconnect drains this task.
+                await asyncio.shield(stream)
                 delay = settings.monitor_reconnect_base_s
                 # An actual provider lookup is required after disconnection.
                 live = await client.is_live()
@@ -295,7 +310,10 @@ class AccountMonitor:
                 if heartbeat:
                     heartbeat.cancel()
                     await asyncio.gather(heartbeat, return_exceptions=True)
-                await client.close()
+                try:
+                    await close_provider(client)
+                except Exception as exc:
+                    print(f"[X] {self.account_id}: cleanup {type(exc).__name__}", flush=True)
             await asyncio.sleep(delay)
             delay = min(delay * 2, settings.monitor_reconnect_max_s)
 
