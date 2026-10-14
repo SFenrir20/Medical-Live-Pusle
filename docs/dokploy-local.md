@@ -21,7 +21,7 @@ de puertos de Dokploy. No basta con reiniciar el contenedor anterior.
 Abrir `http://192.168.1.50:8090` desde la misma red. Comprobar
 `http://192.168.1.50:8090/api/health`, que debe devolver `{"ok":true}`.
 
-La imagen API aplica las migraciones antes de iniciar. Desde la terminal del contenedor `api`, verificar que la revisión sea `0002 (head)`; también se pueden aplicar manualmente:
+La imagen API aplica las migraciones antes de iniciar. Desde la terminal del contenedor `api`, verificar que la revisión sea `0003 (head)`; también se pueden aplicar manualmente:
 
 ```sh
 python -m alembic upgrade head
@@ -30,4 +30,4 @@ python -m alembic current
 
 Esta configuración es para pruebas LAN. Antes de publicar en un VPS, preparar
 el acceso mediante dominio/HTTPS y revisar la configuración de producción.
-Monitor y worker continúan en su perfil desactivado hasta resolver sus pendientes.
+El monitor de TikTok es opcional (perfil `live`); ver `docs/tiktok-monitor.md`. El worker se inicia con el mismo perfil `live`; ver `docs/operations.md`.

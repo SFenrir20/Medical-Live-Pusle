@@ -34,7 +34,7 @@ class PostgresSink:
                 account_id=event["account_id"],
                 broadcast_id=event.get("broadcast_id"),
                 type=event["type"],
-                occurred_at=event.get("occurred_at"),
+                **({"occurred_at": event["occurred_at"]} if event.get("occurred_at") is not None else {}),
                 payload=event.get("payload", {}),
                 raw_text=event.get("raw_text"),
             ).on_conflict_do_nothing(index_elements=["event_id"])

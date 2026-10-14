@@ -12,6 +12,9 @@ dependencies = [
   "pydantic-settings>=2.2",
   "PyJWT[crypto]>=2.10,<3",
   "phonenumbers>=8.13",
+  "python-multipart>=0.0.20",
+  "Pillow>=11.0",
+  "pytesseract>=0.3.13",
   "TikTokLive==7.0.0",  # proveedor de captura, validado con script manual
 ]
 

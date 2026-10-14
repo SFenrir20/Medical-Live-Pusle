@@ -13,3 +13,7 @@ build/
 coverage/
 test-results.xml
 *.tar.gz
+
+# PostgreSQL backups may contain personal information
+*.dump
+backups/

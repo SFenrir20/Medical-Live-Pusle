@@ -3,7 +3,9 @@
 Aplicación Expo para web, Android e iOS, con autenticación Clerk y API FastAPI.
 
 Implementado: selección de cuenta TikTok, entrada/salida, relevo e historial propio en PostgreSQL.
-En desarrollo: monitoreo TikTok, conciliación, métricas e integración con Medical 360.
+Código implementado: monitoreo persistente, conciliación por horario, métricas, contactos/OCR web, roles y puente Medical 360. Requiere validar captura e importación con servicios reales.
+
+Ver `docs/phases.md` para fases y límites; `docs/operations.md` para desplegar y configurar las integraciones.
 
 ## Estructura
 

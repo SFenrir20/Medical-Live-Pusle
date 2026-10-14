@@ -1,44 +1,46 @@
-"""Worker: procesa eventos -> reconciliacion + metricas, idempotente por event_id."""
+"""Process events transactionally; failures leave events available for retry."""
+import asyncio
+import logging
 from datetime import datetime, timezone
 
-from sqlalchemy import select, update
+from sqlalchemy import exists, select
+from sqlalchemy.dialects.postgresql import insert
 
+from ..modules.analytics.models import EventFact, MonitorState
+from ..modules.analytics.processor import handle_event  # noqa: F401
 from ..modules.broadcasts.models import RawEvent
+from ..shared.db import SessionLocal
+
+log = logging.getLogger(__name__)
 
 
-async def handle_event(session, event_id: str) -> dict:
-    """Procesa un RawEvent. Reprocesar el mismo event_id es no-op."""
-    row = (await session.execute(select(RawEvent).where(RawEvent.event_id == event_id))).scalar_one_or_none()
-    if row is None:
-        return {"status": "unknown-event", "deduped": False}
-    if row.processed_at is not None:
-        return {"status": "already-processed", "deduped": True}
-    # TODO: conciliar LIVE<->turno por (account_id, intervalo) y agregar metricas
-    # (comentarios, regalos, joins) + extraer telefonos a contacts.
-    await session.execute(
-        update(RawEvent).where(RawEvent.event_id == event_id).values(
-            processed_at=datetime.now(timezone.utc))
-    )
-    await session.commit()
-    return {"status": "processed", "deduped": False}
+async def process_batch(factory=SessionLocal, limit=100):
+    processed = 0
+    async with factory() as session, session.begin():
+        rows = (await session.scalars(select(RawEvent.event_id).where(
+            RawEvent.broadcast_id.is_not(None),
+            ~exists(select(EventFact.event_id).where(EventFact.event_id == RawEvent.event_id)))
+            .order_by(RawEvent.occurred_at, RawEvent.event_id).limit(limit)
+            .with_for_update(skip_locked=True))).all()
+        for event_id in rows:
+            await handle_event(session, event_id)
+            processed += 1
+    return processed
 
 
-async def run_forever(poll_s: float = 2.0):
-    import asyncio
-
-    from ..shared.db import SessionLocal
-
+async def run_forever(poll_s=2):
     while True:
-        async with SessionLocal() as session:
-            rows = (await session.execute(
-                select(RawEvent.event_id).where(RawEvent.processed_at.is_(None)).limit(100)
-            )).scalars().all()
-            for event_id in rows:
-                await handle_event(session, event_id)
+        try:
+            await process_batch()
+            async with SessionLocal() as session, session.begin():
+                now = datetime.now(timezone.utc)
+                await session.execute(insert(MonitorState).values(
+                    account_id='worker', status='running', observed_at=now).on_conflict_do_update(
+                    index_elements=['account_id'], set_={'status': 'running', 'observed_at': now}))
+        except Exception:
+            log.exception('Event processing failed; transaction rolled back')
         await asyncio.sleep(poll_s)
 
 
-if __name__ == "__main__":
-    import asyncio
-
+if __name__ == '__main__':
     asyncio.run(run_forever())

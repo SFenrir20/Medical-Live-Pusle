@@ -13,6 +13,8 @@ class Settings(BaseSettings):
     livepulse_user_accounts: dict[str, list[Literal["medical", "medical-2"]]] = {}
     # Acceso automatico: toda registrada elige cuenta sin aprobacion del admin.
     default_accounts: list[Literal["medical", "medical-2"]] = ["medical", "medical-2"]
+    admin_user_ids: list[str] = []
+    medical360_token: str = ""
     cors_origins: list[str] = []
     # Captura TikTok: account_id interno -> usuario TikTok (sin @).
     tiktok_accounts: dict[str, str] = {"medical": "medical.cirugias", "medical-2": "medical.cirugias2"}

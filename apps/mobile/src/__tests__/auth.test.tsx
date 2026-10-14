@@ -1,8 +1,9 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react-native';
-import { Text as MockText, View as MockView } from 'react-native';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react-native';
+import { AppState, AppStateStatus, Text as MockText, View as MockView } from 'react-native';
 import Home from '../../app/home';
 import Login from '../../app/index';
 import History from '../../app/history';
+import Staff from '../../app/staff';
 import { getProfile, checkIn } from '../services/api';
 
 const mockToken = jest.fn().mockResolvedValue('signed-token');
@@ -21,9 +22,14 @@ jest.mock('expo-router', () => ({
 }));
 jest.mock('react-native-safe-area-context', () => ({ SafeAreaView: ({ children }: { children: React.ReactNode }) => <MockView>{children}</MockView> }));
 const mockFetch = jest.fn();
+let mockAppStateListener: ((state: AppStateStatus) => void) | undefined;
 jest.mock('expo-crypto', () => ({ getRandomBytes: () => new Uint8Array(16).fill(7) }));
 beforeEach(() => {
- jest.clearAllMocks(); mockFetch.mockReset(); mockSignedIn = false; global.fetch = mockFetch;
+ jest.clearAllMocks();
+ jest.spyOn(AppState, 'addEventListener').mockImplementation((_event, listener) => {
+   mockAppStateListener = listener; return { remove: jest.fn() };
+ });
+ mockFetch.mockReset(); mockSignedIn = false; global.fetch = mockFetch;
  mockFetch.mockImplementation(async (url: string) => ({ ok: true, json: async () => url.includes('/v1/me') ? { id: 'user_1', status: 'approved', accounts: ['medical', 'medical-2'] } : null }));
 });
 
@@ -178,4 +184,60 @@ test('double tap sends only one entry while the request is pending', async () =>
  fireEvent.press(button); fireEvent.press(button);
  await screen.findByText('Tu turno está abierto');
  expect(mockFetch.mock.calls.filter(([, init]) => init.method === 'POST')).toHaveLength(1);
+});
+
+test('refresh keeps the turn and controls visible while the server responds', async () => {
+ server(); await selectFirst();
+ await screen.findByText('MARCAR ENTRADA');
+ let respond!: (value: unknown) => void;
+ mockFetch.mockImplementationOnce(() => new Promise(resolve => { respond = resolve; }));
+ fireEvent.press(screen.getByText('ACTUALIZAR ESTADO'));
+ await waitFor(() => expect(respond).toBeDefined());
+ expect(screen.getByText('No hay un turno abierto en esta cuenta.')).toBeTruthy();
+ expect(screen.getByText('MARCAR ENTRADA')).toBeTruthy();
+ expect(screen.getByText('ACTUALIZAR ESTADO')).toBeTruthy();
+ expect(screen.queryByLabelText('Consultando jornada')).toBeNull();
+ await act(async () => { respond({ ok: true, json: async () => openShift }); });
+ await screen.findByText('Tu turno está abierto');
+ expect(screen.getByText('MARCAR SALIDA')).toBeTruthy();
+});
+
+test('background polling preserves the open confirmation and avoids overlapping reads', async () => {
+ jest.useFakeTimers();
+ try {
+   server(openShift); await selectFirst();
+   fireEvent.press(await screen.findByText('MARCAR SALIDA'));
+   let respond!: (value: unknown) => void;
+   mockFetch.mockImplementationOnce(() => new Promise(resolve => { respond = resolve; }));
+   const count = mockFetch.mock.calls.length;
+   await act(async () => { jest.advanceTimersByTime(30000); });
+   expect(screen.getByText('CONFIRMAR SALIDA')).toBeTruthy();
+   expect(screen.queryByLabelText('Consultando jornada')).toBeNull();
+   // An AppState wakeup during this pending read must not start another one.
+   await act(async () => { mockAppStateListener?.('active'); });
+   expect(mockFetch).toHaveBeenCalledTimes(count + 1);
+   await act(async () => { respond({ ok: true, json: async () => openShift }); });
+   expect(screen.getByText('CONFIRMAR SALIDA')).toBeTruthy();
+ } finally { jest.useRealTimers(); }
+});
+
+
+test('staff registration does not automatically grant privileged screens', async () => {
+ mockSignedIn = true;
+ mockFetch.mockResolvedValue({ ok: true, json: async () => ({ role: 'tiktoker' }) });
+ render(<Staff />);
+ await screen.findByText('Tu registro permite marcar jornadas. Un administrador puede asignarte acceso de Marketing o Atención al Cliente.');
+ expect(screen.queryByText('DESCARGAR CSV PARA LEADSALES')).toBeNull();
+ expect(screen.queryByText('USUARIOS')).toBeNull();
+});
+
+test('care role sees contacts without marketing or role administration', async () => {
+ mockSignedIn = true;
+ mockFetch.mockImplementation(async (url: string) => ({ ok: true, json: async () =>
+   url.includes('/capabilities') ? { role: 'care' } : { items: [], next_offset: null } }));
+ render(<Staff />);
+ await screen.findByText('DESCARGAR CSV PARA LEADSALES');
+ expect(screen.queryByText('MARKETING')).toBeNull();
+ expect(screen.queryByText('USUARIOS')).toBeNull();
+ expect(await screen.findByText('GUARDAR CONTACTO REVISADO')).toBeTruthy();
 });

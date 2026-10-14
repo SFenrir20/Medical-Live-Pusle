@@ -55,7 +55,7 @@ jobs:
                   rows = (await s.execute(text(
                       "SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY 1"))).scalars().all()
                   print("tables:", rows)
-                  assert {"broadcasts", "raw_events", "idempotency_keys", "shifts"} <= set(rows), rows
+                  assert {"broadcasts", "raw_events", "idempotency_keys", "shifts", "event_facts", "leads", "monitor_states", "user_roles"} <= set(rows), rows
           asyncio.run(main())
           EOF
         env:
@@ -100,7 +100,7 @@ jobs:
       - name: Validate Compose
         run: docker compose -f infra/compose.yaml config --quiet
       - name: Build all images
-        run: docker compose -f infra/compose.yaml --profile pending-implementation build
+        run: docker compose -f infra/compose.yaml --profile live build
       - name: Start implemented services
         run: docker compose -f infra/compose.yaml up -d --wait --wait-timeout 120
       - name: Verify HTTP and database
