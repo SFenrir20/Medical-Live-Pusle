@@ -7,8 +7,8 @@ import { ApiError, checkIn, checkOut, getActiveShift, Shift } from '../../servic
 import { shiftTime } from './format';
 
 type Action = { kind: 'in' | 'out'; key: string; expected: string | null };
-export function ShiftCard({ accountId, userId, getToken }: {
- accountId: string; userId: string; getToken: () => Promise<string | null>;
+export function ShiftCard({ accountId, userId, getToken, displayName = null }: {
+ accountId: string; userId: string; getToken: () => Promise<string | null>; displayName?: string | null;
 }) {
  const [active, setActive] = useState<Shift | null>(null);
  const [loading, setLoading] = useState(true);
@@ -66,7 +66,7 @@ export function ShiftCard({ accountId, userId, getToken }: {
      pending.current = action;
      const token = await getToken();
      const saved = action.kind === 'in'
-       ? await checkIn(accountId, token, action.key, action.expected)
+       ? await checkIn(accountId, token, action.key, action.expected, displayName)
        : await checkOut(accountId, action.expected!, token, action.key);
      pending.current = null;
      setRetry(false); setConfirm(null);

@@ -9,7 +9,7 @@ import { theme } from '../src/theme';
 import { ShiftCard } from '../src/features/shifts/ShiftCard';
 
 export default function Home() {
-  const { ready, signedIn, logout, getToken, name } = useSession();
+  const { ready, signedIn, logout, getToken, name, displayName } = useSession();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [selectedAccountId, setSelectedAccountId] = useState<string | null>(null);
   const [error, setError] = useState('');
@@ -94,7 +94,7 @@ export default function Home() {
           </Card>
           {selectedAccount && (
             <ShiftCard key={selectedAccount.id} accountId={selectedAccount.id}
-              userId={profile!.id} getToken={getToken} />
+              userId={profile!.id} getToken={getToken} displayName={displayName ?? null} />
           )}
         </>
       )}
