@@ -45,7 +45,8 @@ async def lock(session: AsyncSession, value: str):
 
 
 async def mark(*, session: AsyncSession, account_id: str, user: dict,
-               idempotency_key: str, operation: str, expected_id: str | None):
+               idempotency_key: str, operation: str, expected_id: str | None,
+               display_name: str | None = None):
     require_account(account_id, user)
     request = {"operation": operation, "account_id": account_id, "expected_id": expected_id}
     key = hashlib.sha256(json.dumps([user["id"], idempotency_key]).encode()).hexdigest()
@@ -73,6 +74,7 @@ async def mark(*, session: AsyncSession, account_id: str, user: dict,
                     active.closed_by = user["id"]
                     await session.flush()
                 shift = Shift(id=str(uuid4()), account_id=account_id, user_id=user["id"],
+                              display_name=(display_name or "").strip()[:100] or None,
                               started_at=now)
                 session.add(shift)
                 result = serialize(shift)

@@ -11,7 +11,7 @@ const mockLogout = jest.fn().mockResolvedValue(undefined);
 const mockHosted = jest.fn().mockResolvedValue({});
 let mockSignedIn = false;
 jest.mock('@clerk/expo/hosted-auth', () => ({ useHostedAuth: () => ({ startHostedAuth: mockHosted }) }));
-jest.mock('../features/auth/session', () => ({ useSession: () => ({ ready: true, signedIn: mockSignedIn, getToken: mockToken, logout: mockLogout, name: 'Ana' }) }));
+jest.mock('../features/auth/session', () => ({ useSession: () => ({ ready: true, signedIn: mockSignedIn, getToken: mockToken, logout: mockLogout, name: 'Ana', displayName: 'Ana Ruiz' }) }));
 jest.mock('expo-router', () => ({
  useFocusEffect: (callback: () => void) => {
    const React = jest.requireActual('react');
@@ -126,7 +126,7 @@ test('entry is explicit, persists after remount, and exit needs confirmation', a
  server(); await selectFirst();
  fireEvent.press(await screen.findByText('MARCAR ENTRADA'));
  await screen.findByText('Tu turno está abierto');
- expect(mockFetch).toHaveBeenCalledWith(expect.stringContaining('/check-in'), expect.objectContaining({ method: 'POST', body: JSON.stringify({ account_id: 'medical', replace_shift_id: null }) }));
+ expect(mockFetch).toHaveBeenCalledWith(expect.stringContaining('/check-in'), expect.objectContaining({ method: 'POST', body: JSON.stringify({ account_id: 'medical', replace_shift_id: null, display_name: 'Ana Ruiz' }) }));
  screen.unmount();
  await selectFirst();
  await screen.findByText('Tu turno está abierto');
@@ -142,7 +142,7 @@ test('handover explicitly identifies the observed turn', async () => {
  expect(mockFetch.mock.calls.filter(([, init]) => init.method === 'POST')).toHaveLength(0);
  fireEvent.press(screen.getByText('CONFIRMAR RELEVO'));
  await screen.findByText('Tu turno está abierto');
- expect(mockFetch).toHaveBeenCalledWith(expect.stringContaining('/check-in'), expect.objectContaining({ body: JSON.stringify({ account_id: 'medical', replace_shift_id: 'shift-1' }) }));
+ expect(mockFetch).toHaveBeenCalledWith(expect.stringContaining('/check-in'), expect.objectContaining({ body: JSON.stringify({ account_id: 'medical', replace_shift_id: 'shift-1', display_name: 'Ana Ruiz' }) }));
 });
 test('lost response retries with the same key and body', async () => {
  server(); await selectFirst();

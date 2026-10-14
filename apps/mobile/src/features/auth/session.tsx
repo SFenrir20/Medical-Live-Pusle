@@ -14,6 +14,7 @@ export function useSession() {
  const { signOut } = useClerk();
  const { user } = useUser();
  return { ready: isLoaded, signedIn: !!isSignedIn, getToken,
+   displayName: user?.fullName || user?.firstName || null,
    name: user?.firstName || user?.primaryEmailAddress?.emailAddress || 'bienvenida',
    logout: () => signOut() };
 }

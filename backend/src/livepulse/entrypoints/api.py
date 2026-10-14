@@ -27,6 +27,7 @@ def me(user=Depends(get_current_user)):
 class CheckInBody(BaseModel):
     account_id: str = Field(min_length=1, max_length=32)
     replace_shift_id: str | None = Field(default=None, min_length=1, max_length=36)
+    display_name: str | None = Field(default=None, max_length=100)
 
 
 @app.get("/health")
@@ -55,7 +56,8 @@ async def api_check_in(
 ):
     return await service.mark(session=session, account_id=body.account_id, user=user,
                               idempotency_key=idempotency_key, operation="check-in",
-                              expected_id=body.replace_shift_id)
+                              expected_id=body.replace_shift_id,
+                              display_name=body.display_name)
 
 
 @app.post("/v1/shifts/check-out")

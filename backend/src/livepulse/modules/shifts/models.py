@@ -9,6 +9,7 @@ class Shift(Base):
     id = Column(String(36), primary_key=True)
     account_id = Column(String(32), nullable=False)
     user_id = Column(String(255), nullable=False)
+    display_name = Column(String(100))
     started_at = Column(DateTime(timezone=True), nullable=False)
     ended_at = Column(DateTime(timezone=True))
     end_reason = Column(String(16))

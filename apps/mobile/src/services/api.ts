@@ -33,10 +33,10 @@ export async function getProfile(token: string | null): Promise<Profile> {
  return authenticated('/v1/me', token);
 }
 export async function checkIn(account_id: string, token: string | null, key: string,
- replace_shift_id: string | null = null): Promise<Shift> {
+ replace_shift_id: string | null = null, display_name: string | null = null): Promise<Shift> {
  return authenticated('/v1/shifts/check-in', token, { method: 'POST',
    headers: { 'Content-Type': 'application/json', 'Idempotency-Key': key },
-   body: JSON.stringify({ account_id, replace_shift_id }) });
+   body: JSON.stringify({ account_id, replace_shift_id, display_name }) });
 }
 export async function checkOut(account_id: string, shift_id: string, token: string | null,
  key: string): Promise<Shift> {

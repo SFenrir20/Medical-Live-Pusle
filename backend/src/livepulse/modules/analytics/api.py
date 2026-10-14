@@ -18,6 +18,8 @@ from ..broadcasts.models import RawEvent
 from ..shifts.service import lock
 from .access import register, require_role
 from .classify import phones_in
+from .medical360 import inbox as m360_inbox
+from .medical360 import monitor as m360_monitor
 from .models import (
     EventFact,
     Lead,
@@ -63,6 +65,20 @@ async def integration(x_medical360_token: str = Header(default='')):
 async def integration_lives(account_id: str | None = None, limit: int = Query(20, ge=1, le=100),
                            offset: int = Query(0, ge=0), session=Depends(get_session)):
     return await lives(session, account_id, limit, offset)
+
+
+@router.get('/integrations/medical360/monitor', dependencies=[Depends(integration)])
+async def integration_monitor(session=Depends(get_session)):
+    return await m360_monitor(session)
+
+
+@router.get('/integrations/medical360/inbox', dependencies=[Depends(integration)])
+async def integration_inbox(since: datetime | None = None, limit: int = Query(100, ge=1, le=200),
+                            only_with_phone: bool = False, account_id: str | None = None,
+                            session=Depends(get_session)):
+    if since is not None and since.tzinfo is None:
+        since = since.replace(tzinfo=timezone.utc)
+    return await m360_inbox(session, since, limit, only_with_phone, account_id)
 
 
 @router.get('/monitor/status')

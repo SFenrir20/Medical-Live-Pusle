@@ -169,3 +169,55 @@ async def test_roles_and_leadsales_export_are_separated(database):
         assert await s.scalar(select(func.count()).select_from(Lead)) == 1
         assert await s.scalar(select(func.count()).select_from(LeadAlias)) == 2
         assert (await s.get(UserRole, 'ana')).role == 'care'
+
+
+async def test_medical360_bridge_exposes_comment_phone_state_and_monitor(database):
+    factory, client = database
+    now = datetime.now(timezone.utc)
+    bid = await BroadcastStore(factory).connected('medical', 'room9', now - timedelta(hours=2))
+    async with factory() as s, s.begin():
+        s.add(Shift(id='s1', user_id='ana', display_name='Ana Ruiz', account_id='medical',
+                    started_at=now - timedelta(hours=3)))
+        s.add(RawEvent(event_id='c1', account_id='medical', broadcast_id=bid, type='comment',
+                       occurred_at=now - timedelta(minutes=20),
+                       payload={'user': '77', 'username': 'mariita', 'nickname': 'Mariita'},
+                       raw_text='Quiero informes, mi número es +51 987 654 321'))
+        s.add(RawEvent(event_id='c2', account_id='medical', broadcast_id=bid, type='comment',
+                       occurred_at=now - timedelta(minutes=10),
+                       payload={'user': '88', 'username': 'luis'}, raw_text='Qué bonito'))
+        s.add(RawEvent(event_id='a1', account_id='medical', broadcast_id=bid, type='audience',
+                       occurred_at=now - timedelta(minutes=5), payload={'viewers': 40}))
+    await process_batch(factory)
+    headers = {'X-Medical360-Token': 'server-secret'}
+    assert (await client.get('/v1/integrations/medical360/inbox')).status_code == 401
+    assert (await client.get('/v1/integrations/medical360/monitor')).status_code == 401
+
+    box = (await client.get('/v1/integrations/medical360/inbox', headers=headers)).json()
+    first = next(i for i in box['items'] if i['event_id'] == 'c1')
+    assert first['comment'].startswith('Quiero informes')
+    assert first['phones'] == ['+51987654321']
+    assert first['tiktok_username'] == '@mariita' and first['tiktoker'] == 'Ana Ruiz'
+    assert first['kind'] == 'Cliente potencial' and first['state'] == 'Por contactar'
+    assert first['origin'] == 'live' and first['contacted_at']['utc'] is None
+    assert first['received_at']['lima'].endswith('-05:00')
+    only = (await client.get('/v1/integrations/medical360/inbox?only_with_phone=true',
+                             headers=headers)).json()['items']
+    assert [i['event_id'] for i in only] == ['c1']
+
+    await client.put('/v1/staff/users/care1/role', json={'role': 'care'},
+                     headers={'X-Test-User': 'boss'})
+    await client.get('/v1/capabilities', headers={'X-Test-User': 'care1'})
+    await client.put('/v1/staff/users/care1/role', json={'role': 'care'},
+                     headers={'X-Test-User': 'boss'})
+    await client.patch('/v1/contacts/' + first['lead_id'], headers={'X-Test-User': 'care1'},
+                       json={'status': 'contacted', 'expected_status': 'new'})
+    box = (await client.get('/v1/integrations/medical360/inbox', headers=headers)).json()
+    first = next(i for i in box['items'] if i['event_id'] == 'c1')
+    assert first['state'] == 'Contactado' and first['contacted_at']['utc'] is not None
+
+    table = (await client.get('/v1/integrations/medical360/monitor', headers=headers)).json()
+    row = next(a for a in table['accounts'] if a['account_id'] == 'medical')
+    assert row['on_air'] and row['tiktoker'] == 'Ana Ruiz' and row['account'] == '@medical.cirugias'
+    assert row['comments'] == 2 and row['peak_viewers'] == 40
+    assert row['contacts'] == 1 and row['contacts_pending'] == 0
+    assert row['started_at']['lima'].endswith('-05:00') and row['ended_at']['utc'] is None
