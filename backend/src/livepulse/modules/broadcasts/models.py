@@ -48,5 +48,11 @@ class RawEvent(Base):
     payload: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
     processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     raw_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Set once the event was folded into lives/metrics/contacts. Survives retention.
+    published_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True)
 
-    __table_args__ = (Index("ix_raw_events_account_occurred", "account_id", "occurred_at"),)
+    __table_args__ = (
+        Index("ix_raw_events_account_occurred", "account_id", "occurred_at"),
+        Index("ix_raw_events_published", "published_at", "occurred_at"),
+    )

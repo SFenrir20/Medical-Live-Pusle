@@ -1,0 +1,10 @@
+{
+  "description": "Monitor de comentarios en vivo y mensajes sociales para equipos médicos.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}
