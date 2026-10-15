@@ -16,14 +16,16 @@ def jwks_client(issuer: str):
     return PyJWKClient(f"{issuer}/.well-known/jwks.json", timeout=5)
 
 
-def get_current_user(credentials=Depends(security)):
-    if credentials is None:
-        raise HTTPException(401, "Inicia sesión para continuar.")
+def clerk_configured() -> bool:
+    return settings.clerk_issuer.rstrip("/").startswith("https://")         and bool(settings.clerk_authorized_parties)
+
+
+def verify_token(token: str) -> dict:
+    """Validate a Clerk session JWT and return the person (id/accounts/status)."""
     issuer = settings.clerk_issuer.rstrip("/")
-    if not issuer.startswith("https://") or not settings.clerk_authorized_parties:
+    if not clerk_configured():
         raise HTTPException(503, "Clerk no está configurado en el servidor.")
     try:
-        token = credentials.credentials
         key = jwks_client(issuer).get_signing_key_from_jwt(token).key
         claims = jwt.decode(
             token, key, algorithms=["RS256"], issuer=issuer,
@@ -47,3 +49,9 @@ def get_current_user(credentials=Depends(security)):
         accounts = list(settings.default_accounts)
     return {"id": sub, "accounts": accounts,
             "status": "approved" if accounts else "pending"}
+
+
+def get_current_user(credentials=Depends(security)):
+    if credentials is None:
+        raise HTTPException(401, "Inicia sesión para continuar.")
+    return verify_token(credentials.credentials)

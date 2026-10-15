@@ -14,7 +14,11 @@ class Settings(BaseSettings):
     # Acceso automatico: toda registrada elige cuenta sin aprobacion del admin.
     default_accounts: list[Literal["medical", "medical-2"]] = ["medical", "medical-2"]
     admin_user_ids: list[str] = []
-    medical360_token: str = ""
+    # Service tokens (Authorization: Bearer). Empty = that credential is disabled.
+    social_live_token: str = ""          # Medical Social Live: write events
+    medical360_token: str = ""           # Medical 360: read statistics
+    medical360_export_token: str = ""    # Medical 360: also export detailed comments
+    comments_retention_days: int = 30
     cors_origins: list[str] = []
     # Captura TikTok: account_id interno -> usuario TikTok (sin @).
     tiktok_accounts: dict[str, str] = {"medical": "medical.cirugias", "medical-2": "medical.cirugias2"}

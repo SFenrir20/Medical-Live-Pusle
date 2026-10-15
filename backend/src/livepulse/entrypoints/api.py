@@ -5,7 +5,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..modules.analytics.api import router as analytics_router
 from ..modules.analytics.ocr import router as ocr_router
+from ..modules.identity.api import router as identity_router
 from ..modules.shifts import service
+from ..modules.social_live.api import marketing as marketing_router
+from ..modules.social_live.api import social as social_live_router
 from ..shared.auth import get_current_user
 from ..shared.config import settings
 from ..shared.db import get_session
@@ -14,6 +17,9 @@ app = FastAPI(title="LivePulse API", version="0.3.0")
 app.include_router(analytics_router)
 
 app.include_router(ocr_router)
+app.include_router(identity_router)
+app.include_router(social_live_router)
+app.include_router(marketing_router)
 app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins,
                    allow_methods=["GET", "POST", "PUT", "PATCH"],
                    allow_headers=["Authorization", "Content-Type", "Idempotency-Key"])

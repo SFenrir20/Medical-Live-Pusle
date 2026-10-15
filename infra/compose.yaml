@@ -27,6 +27,9 @@ services:
       LIVEPULSE_USER_ACCOUNTS: ${LIVEPULSE_USER_ACCOUNTS:-null}
       ADMIN_USER_IDS: ${ADMIN_USER_IDS:-[]}
       MEDICAL360_TOKEN: ${MEDICAL360_TOKEN:-}
+      MEDICAL360_EXPORT_TOKEN: ${MEDICAL360_EXPORT_TOKEN:-}
+      SOCIAL_LIVE_TOKEN: ${SOCIAL_LIVE_TOKEN:-}
+      COMMENTS_RETENTION_DAYS: ${COMMENTS_RETENTION_DAYS:-30}
     ports:
       - "127.0.0.1:8000:8000"
     depends_on:
@@ -83,6 +86,7 @@ services:
       dockerfile: Dockerfile.worker
     environment:
       DATABASE_URL: postgresql+asyncpg://livepulse:livepulse@db:5432/livepulse
+      COMMENTS_RETENTION_DAYS: ${COMMENTS_RETENTION_DAYS:-30}
     depends_on:
       api:
         condition: service_healthy
