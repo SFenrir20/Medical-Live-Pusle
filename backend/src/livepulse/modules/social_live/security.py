@@ -23,14 +23,17 @@ from ..identity.roles import PERMISSIONS, role_for
 def _scopes(token: str) -> set[str]:
     granted: set[str] = set()
     for secret, scopes in ((settings.social_live_token, {'ingest'}),
-                           (settings.medical360_token, {'read'}),
-                           (settings.medical360_export_token, {'read', 'export'})):
+                           (settings.medical360_token, {'read', 'contacts:read_all'}),
+                           (settings.medical360_export_token,
+                            {'read', 'export', 'contacts:read_all'})):
         if secret and hmac.compare_digest(secret.encode(), token.encode()):
             granted |= scopes
     return granted
 
 
-def require_scope(scope: str):
+def require_scope(*scopes: str):
+    """Pass if the caller holds ANY of the given scopes."""
+
     async def dependency(authorization: str = Header(default=''),
                          session=Depends(get_session)):
         kind, _, token = authorization.partition(' ')
@@ -40,7 +43,7 @@ def require_scope(scope: str):
                                 headers={'WWW-Authenticate': 'Bearer'})
         granted = _scopes(token)
         if granted:
-            if scope not in granted:
+            if not granted & set(scopes):
                 raise HTTPException(403, 'El token no tiene permiso para esta operación.')
             return {'kind': 'service', 'scopes': granted}
         if not clerk.clerk_configured():
@@ -49,7 +52,7 @@ def require_scope(scope: str):
         person = clerk.verify_token(token)  # 401/503 if the session is not valid
         row = await session.get(UserRole, person['id'])
         role = role_for(person['id'], row.role if row else None)
-        if scope not in PERMISSIONS[role]:
+        if not PERMISSIONS[role] & set(scopes):
             raise HTTPException(403, 'Tu rol no tiene permiso para esta operación.')
         return {'kind': 'user', 'user_id': person['id'], 'role': role}
     return dependency

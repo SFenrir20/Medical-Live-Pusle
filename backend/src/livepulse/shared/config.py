@@ -19,6 +19,8 @@ class Settings(BaseSettings):
     medical360_token: str = ""           # Medical 360: read statistics
     medical360_export_token: str = ""    # Medical 360: also export detailed comments
     comments_retention_days: int = 30
+    # Private messages are not captured by any integration. Flip only when one exists.
+    dm_capture_connected: bool = False
     cors_origins: list[str] = []
     # Captura TikTok: account_id interno -> usuario TikTok (sin @).
     tiktok_accounts: dict[str, str] = {"medical": "medical.cirugias", "medical-2": "medical.cirugias2"}

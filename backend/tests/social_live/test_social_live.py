@@ -3,51 +3,17 @@ import io
 from datetime import datetime, timedelta, timezone
 
 import pytest
-from httpx import ASGITransport, AsyncClient
 from openpyxl import load_workbook
 from sqlalchemy import func, select, update
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-from sqlalchemy.pool import StaticPool
 
-from livepulse.entrypoints.api import app
 from livepulse.modules.social_live import models as m
 from livepulse.modules.social_live.retention import purge_expired
-from livepulse.shared.config import settings
-from livepulse.shared.db import get_session
 
 INGEST = {'Authorization': 'Bearer ingest-secret'}
 READ = {'Authorization': 'Bearer read-secret'}
 EXPORT = {'Authorization': 'Bearer export-secret'}
 API = '/api/social-live'
 MKT = '/api/marketing/tiktok'
-TABLES = [m.TiktokAccount.__table__, m.Tiktoker.__table__, m.Live.__table__,
-          m.LiveComment.__table__, m.LiveEventKey.__table__, m.LiveMetrics.__table__,
-          m.CapturedPhone.__table__]
-
-
-@pytest.fixture
-async def env(monkeypatch):
-    monkeypatch.setattr(settings, 'social_live_token', 'ingest-secret')
-    monkeypatch.setattr(settings, 'medical360_token', 'read-secret')
-    monkeypatch.setattr(settings, 'medical360_export_token', 'export-secret')
-    monkeypatch.setattr(settings, 'comments_retention_days', 30)
-    engine = create_async_engine('sqlite+aiosqlite://', poolclass=StaticPool,
-                                 connect_args={'check_same_thread': False})
-    async with engine.begin() as connection:
-        await connection.run_sync(lambda sync: m.Live.metadata.create_all(sync, tables=TABLES))
-    factory = async_sessionmaker(engine, expire_on_commit=False)
-
-    async def session():
-        async with factory() as value:
-            yield value
-
-    app.dependency_overrides[get_session] = session
-    try:
-        async with AsyncClient(transport=ASGITransport(app=app), base_url='http://test') as client:
-            yield client, factory
-    finally:
-        app.dependency_overrides.clear()
-        await engine.dispose()
 
 
 async def seed(client, live_id='LIVE-1025', account='medical', tiktoker='lucia'):
@@ -114,7 +80,9 @@ async def test_events_consolidate_metrics_and_deduplicate_retries(env):
     metrics = (await client.get(f'{MKT}/lives/{live}/metrics', headers=READ)).json()
     assert metrics['comments_count'] == 3
     assert metrics['likes_count'] == 40 and metrics['views'] == 300
-    assert metrics['unique_viewers'] == 55  # maximum reported, never lowered
+    assert metrics['peak_viewers'] == 55  # highest concurrent sample, never lowered
+    assert metrics['average_viewers'] == 43.0  # (55 + 31) / 2 samples
+    assert metrics['unique_viewers'] is None  # no source: not available
     assert metrics['interested_viewers'] == 1  # the same user twice counts once
     assert metrics['phones_captured'] == 3  # 987654321, 985857968, 912345678
     # Counter events without event_id are not idempotent: the retry added the share again.
@@ -258,7 +226,8 @@ async def test_hourly_ranking_accounts_and_overview(env):
 
     overview = (await client.get(f'{MKT}/overview', headers=READ)).json()
     assert overview['lives'] == 2 and overview['phones'] == 3 and overview['live_now'] == 2
-    assert overview['unique_viewers'] == 80 and overview['leads_per_hour'] > 0
+    assert overview['peak_viewers'] == 80 and overview['unique_viewers'] is None
+    assert overview['leads_per_hour'] > 0
     only = (await client.get(f'{MKT}/overview', headers=READ,
                              params={'account_id': 'medical-2'})).json()
     assert only['lives'] == 1 and only['phones'] == 1

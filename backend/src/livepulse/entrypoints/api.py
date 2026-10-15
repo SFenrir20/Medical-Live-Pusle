@@ -9,6 +9,7 @@ from ..modules.identity.api import router as identity_router
 from ..modules.shifts import service
 from ..modules.social_live.api import marketing as marketing_router
 from ..modules.social_live.api import social as social_live_router
+from ..modules.social_live.leads import router as leads_router
 from ..shared.auth import get_current_user
 from ..shared.config import settings
 from ..shared.db import get_session
@@ -20,6 +21,7 @@ app.include_router(ocr_router)
 app.include_router(identity_router)
 app.include_router(social_live_router)
 app.include_router(marketing_router)
+app.include_router(leads_router)
 app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins,
                    allow_methods=["GET", "POST", "PUT", "PATCH"],
                    allow_headers=["Authorization", "Content-Type", "Idempotency-Key"])

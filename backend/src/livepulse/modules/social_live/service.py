@@ -1,6 +1,9 @@
 """Ingestion rules. Counters are consolidated in live_metrics as events arrive, so dashboards
 never count raw comments. Portable SQL: increments are atomic UPDATEs, duplicates are detected
-with a savepoint instead of dialect-specific upserts."""
+with a savepoint instead of dialect-specific upserts.
+
+Contacts: a phone number is ONE contact (phone_registry), created at its first capture on any
+account. Later appearances are stored in captured_phones and never counted as new."""
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
@@ -9,13 +12,17 @@ from fastapi import HTTPException
 from sqlalchemy import case, func, select, update
 from sqlalchemy.exc import IntegrityError
 
+from ...shared.config import settings
 from ..analytics.classify import interested_in, phones_in
 from .models import (
     CapturedPhone,
+    ContactAudit,
     Live,
     LiveComment,
     LiveEventKey,
+    LiveInterestedUser,
     LiveMetrics,
+    PhoneRegistry,
     TiktokAccount,
     Tiktoker,
 )
@@ -36,6 +43,7 @@ def aware_utc(value):
 
 
 def normalize_phone(raw: str, region='PE') -> str | None:
+    """E.164, or None. The same number written any way is the same contact."""
     found = phones_in(raw, region)
     if found:
         return found[0]
@@ -60,12 +68,13 @@ async def create_live(session, body) -> tuple[Live, bool]:
     if body.live_id:
         existing = await session.get(Live, body.live_id)
         if existing is not None:
-            if (existing.tiktoker_id, existing.account_id) != (body.tiktoker_id, body.account_id):
-                raise HTTPException(409, 'Ese live_id ya existe con otro TikToker o cuenta.')
+            if existing.account_id != body.account_id or (
+                    body.tiktoker_id and existing.tiktoker_id not in (None, body.tiktoker_id)):
+                raise HTTPException(409, 'Ese live_id ya existe con otra cuenta o TikToker.')
             return existing, False
-    tiktoker = await session.get(Tiktoker, body.tiktoker_id)
+    tiktoker = await session.get(Tiktoker, body.tiktoker_id) if body.tiktoker_id else None
     account = await session.get(TiktokAccount, body.account_id)
-    if tiktoker is None or not tiktoker.active:
+    if body.tiktoker_id and (tiktoker is None or not tiktoker.active):
         raise HTTPException(422, 'TikToker inexistente o inactivo.')
     if account is None or not account.active:
         raise HTTPException(422, 'Cuenta TikTok inexistente o inactiva.')
@@ -92,6 +101,17 @@ async def _claim_event(session, live_id, event_id) -> bool:
     return True
 
 
+async def claim_interest(session, live_id, username) -> bool:
+    # The composite primary key serializes concurrent comments from the same viewer.
+    try:
+        async with session.begin_nested():
+            session.add(LiveInterestedUser(live_id=live_id, username=username))
+            await session.flush()
+    except IntegrityError:
+        return False
+    return True
+
+
 async def _bump(session, live_id, column, amount):
     if amount <= 0:
         return
@@ -99,32 +119,114 @@ async def _bump(session, live_id, column, amount):
         **{column: getattr(LiveMetrics, column) + amount, 'updated_at': utcnow()}))
 
 
-async def save_phone(session, live_id, phone, username, source, captured_at) -> bool:
+async def audit(session, registry_id, actor, action, previous=None, value=None):
+    session.add(ContactAudit(registry_id=registry_id, actor=actor, action=action,
+                             previous=previous, value=value))
+
+
+# ---------- contacts (global registry) ----------
+
+async def save_phone(session, live: Live, phone, username, source, captured_at):
+    """Record one appearance of `phone` in `live`.
+
+    Returns ('new' | 'mention' | None, affected live ids).
+      new      first time this number is ever seen (it becomes the contact's first capture)
+      mention  a known contact appeared in this live for the first time
+      None     already recorded in this live
+
+    Concurrency: the unique phone makes the first insert win; the loser becomes a mention.
+    If the loser's capture time is EARLIER (events can arrive out of order), it becomes the
+    first capture and the previous one is demoted, so reports attribute by true first time."""
+    captured_at = aware_utc(captured_at)
+    affected = {live.id}
+    is_new = True
     try:
         async with session.begin_nested():
-            session.add(CapturedPhone(live_id=live_id, phone=phone, tiktok_username=username,
-                                      source=source, captured_at=captured_at, status='new'))
+            session.add(PhoneRegistry(
+                phone=phone, first_live_id=live.id, first_account_id=live.account_id,
+                first_captured_at=captured_at, first_username=username, first_source=source,
+                status='new'))
             await session.flush()
     except IntegrityError:
-        return False  # the same number in the same live is one lead
-    return True
+        is_new = False
+    registry = await session.scalar(select(PhoneRegistry).where(PhoneRegistry.phone == phone))
+    if is_new:
+        await audit(session, registry.id, 'system', 'captured', None, live.id)
+    elif captured_at < aware_utc(registry.first_captured_at):
+        previous = await session.scalar(select(CapturedPhone).where(
+            CapturedPhone.phone == phone, CapturedPhone.is_new.is_(True)))
+        if previous is not None:
+            previous.is_new = False
+            affected.add(previous.live_id)
+        registry.first_live_id, registry.first_account_id = live.id, live.account_id
+        registry.first_captured_at, registry.first_username = captured_at, username
+        registry.first_source, registry.updated_at = source, utcnow()
+        is_new = True
+    elif registry.first_live_id == live.id and not await session.scalar(
+            select(CapturedPhone.id).where(CapturedPhone.phone == phone,
+                                           CapturedPhone.is_new.is_(True))):
+        # Contact converted from older data: this appearance IS its first capture.
+        is_new = True
+
+    existing = await session.scalar(select(CapturedPhone).where(
+        CapturedPhone.live_id == live.id, CapturedPhone.phone == phone))
+    if existing is not None:
+        if is_new:  # an earlier capture inside the same live
+            existing.captured_at, existing.is_new = captured_at, True
+            existing.tiktok_username, existing.source = username, source
+        elif aware_utc(existing.captured_at) > captured_at:
+            existing.captured_at = captured_at
+        return None, affected
+    try:
+        async with session.begin_nested():
+            session.add(CapturedPhone(live_id=live.id, phone=phone, tiktok_username=username,
+                                      source=source, captured_at=captured_at, is_new=is_new))
+            await session.flush()
+    except IntegrityError:
+        return None, affected  # a concurrent writer recorded this appearance
+    return ('new' if is_new else 'mention'), affected
 
 
 async def refresh_derived(session, live: Live):
-    """phones_captured and leads_per_hour come from the stored rows, not from increments."""
-    phones = await session.scalar(select(func.count()).select_from(CapturedPhone)
-                                  .where(CapturedPhone.live_id == live.id)) or 0
+    """Phone counters come from the stored rows, not from increments.
+    phones_captured = numbers whose FIRST capture was in this live; phone_mentions = every
+    appearance in it."""
+    phones = await session.scalar(select(func.count()).select_from(CapturedPhone).where(
+        CapturedPhone.live_id == live.id, CapturedPhone.is_new.is_(True))) or 0
+    mentions = await session.scalar(select(func.count()).select_from(CapturedPhone)
+                                    .where(CapturedPhone.live_id == live.id)) or 0
     end = live.ended_at or utcnow()
     seconds = max(60.0, (aware_utc(end) - aware_utc(live.started_at)).total_seconds())
     await session.execute(update(LiveMetrics).where(LiveMetrics.live_id == live.id).values(
-        phones_captured=phones, leads_per_hour=round(phones / (seconds / 3600), 2),
-        updated_at=utcnow()))
+        phones_captured=phones, phone_mentions=mentions,
+        leads_per_hour=round(phones / (seconds / 3600), 2), updated_at=utcnow()))
 
 
-async def ingest(session, live: Live, event: EventIn) -> dict:
+async def refresh_many(session, live: Live, live_ids):
+    for live_id in live_ids:
+        target = live if live_id == live.id else await session.get(Live, live_id)
+        if target is not None:
+            await refresh_derived(session, target)
+
+
+def too_old_error():
+    return HTTPException(409, {
+        'code': 'EVENT_TOO_OLD',
+        'message': f'El evento es anterior a {settings.comments_retention_days} días: ya no se '
+                   'puede deduplicar y se rechaza para no duplicar métricas históricas.'})
+
+
+async def ingest(session, live: Live, event: EventIn, *, strict_age: bool = True,
+                 store_detail: bool = True) -> dict:
+    """Apply one event. strict_age rejects events older than the retention window (their
+    idempotency keys may already be gone). The monitor bridge passes False because it
+    tracks publication on the raw event itself."""
     if live.status == 'cancelled':
         raise HTTPException(409, 'El live fue cancelado.')
     at = event.timestamp or utcnow()
+    if strict_age and event.timestamp is not None and aware_utc(event.timestamp) < (
+            utcnow() - timedelta(days=settings.comments_retention_days)):
+        raise too_old_error()
     if live.status == 'finished' and aware_utc(at) > aware_utc(live.ended_at) + LATE_EVENT_GRACE:
         raise HTTPException(409, 'El live ya terminó.')
     if live.status == 'scheduled':
@@ -132,31 +234,39 @@ async def ingest(session, live: Live, event: EventIn) -> dict:
     if not await _claim_event(session, live.id, event.event_id):
         return {'accepted': False, 'duplicate': True, 'event_type': event.event_type}
 
-    kind, phones_found = event.event_type, 0
+    kind, new_phones, affected = event.event_type, 0, {live.id}
     if kind == 'comment':
         text = (event.text or '').strip()
         if not text or not event.username:
             raise HTTPException(422, 'Un comentario requiere username y text.')
         found = phones_in(text)
         interested = interested_in(text)
-        first_interest = interested and not await session.scalar(
-            select(LiveComment.id).where(LiveComment.live_id == live.id,
-                                         LiveComment.username == event.username,
-                                         LiveComment.interested.is_(True)).limit(1))
-        session.add(LiveComment(live_id=live.id, username=event.username, comment=text,
-                                phone_detected=found[0] if found else None,
-                                interested=interested, created_at=at))
+        first_interest = interested and await claim_interest(session, live.id, event.username)
+        if store_detail:
+            session.add(LiveComment(live_id=live.id, username=event.username, comment=text,
+                                    phone_detected=found[0] if found else None,
+                                    interested=interested, created_at=at))
         await _bump(session, live.id, 'comments_count', 1)
         if first_interest:
             await _bump(session, live.id, 'interested_viewers', 1)
         for phone in found:
-            phones_found += await save_phone(session, live.id, phone, event.username,
-                                             'comment', at)
+            outcome, touched = await save_phone(session, live, phone, event.username,
+                                                'comment', at)
+            new_phones += outcome == 'new'
+            affected |= touched
     elif kind in COUNTER:
         await _bump(session, live.id, COUNTER[kind], event.value)
     elif kind == 'viewer':
+        # A sample of CONCURRENT viewers: feeds peak and average, never "unique viewers".
         await session.execute(update(LiveMetrics).where(LiveMetrics.live_id == live.id).values(
-            unique_viewers=case((LiveMetrics.unique_viewers < event.value, event.value),
+            peak_viewers=case((LiveMetrics.peak_viewers < event.value, event.value),
+                              else_=LiveMetrics.peak_viewers),
+            viewer_samples=LiveMetrics.viewer_samples + 1,
+            viewer_sum=LiveMetrics.viewer_sum + event.value, updated_at=utcnow()))
+    elif kind == 'unique_viewers':
+        await session.execute(update(LiveMetrics).where(LiveMetrics.live_id == live.id).values(
+            unique_viewers=case((LiveMetrics.unique_viewers.is_(None), event.value),
+                                (LiveMetrics.unique_viewers < event.value, event.value),
                                 else_=LiveMetrics.unique_viewers), updated_at=utcnow()))
     elif kind == 'interested':
         await _bump(session, live.id, 'interested_viewers', max(1, event.value))
@@ -166,45 +276,25 @@ async def ingest(session, live: Live, event: EventIn) -> dict:
         phone = normalize_phone(event.phone or event.text or '')
         if not phone:
             raise HTTPException(422, 'No se pudo reconocer un teléfono válido.')
-        phones_found += await save_phone(session, live.id, phone, event.username,
-                                         SOURCE_BY_EVENT[kind], at)
-    await refresh_derived(session, live)
-    return {'accepted': True, 'duplicate': False, 'event_type': kind,
-            'phones_new': phones_found}
+        outcome, touched = await save_phone(session, live, phone, event.username,
+                                            SOURCE_BY_EVENT[kind], at)
+        new_phones += outcome == 'new'
+        affected |= touched
+    await refresh_many(session, live, affected)
+    return {'accepted': True, 'duplicate': False, 'event_type': kind, 'phones_new': new_phones}
 
 
-async def register_phone(session, live: Live, body) -> tuple[CapturedPhone, bool]:
+async def register_phone(session, live: Live, body) -> tuple[PhoneRegistry, str | None]:
     if live.status == 'cancelled':
         raise HTTPException(409, 'El live fue cancelado.')
     phone = normalize_phone(body.phone)
     if not phone:
         raise HTTPException(422, 'Teléfono inválido.')
-    captured_at = body.captured_at or utcnow()
-    created = await save_phone(session, live.id, phone, body.tiktok_username, body.source,
-                               captured_at)
-    row = await session.scalar(select(CapturedPhone).where(
-        CapturedPhone.live_id == live.id, CapturedPhone.phone == phone))
-    await refresh_derived(session, live)
-    return row, created
-
-
-async def update_phone(session, phone_id: int, body) -> CapturedPhone:
-    row = await session.get(CapturedPhone, phone_id, with_for_update=True)
-    if row is None:
-        raise HTTPException(404, 'Teléfono no encontrado.')
-    now = utcnow()
-    if body.status is not None:
-        row.status = body.status
-        if body.status != 'new' and row.contacted_at is None and body.status != 'discarded':
-            row.contacted_at = body.contacted_at or now
-    if body.contacted_at is not None and row.contacted_at is None:
-        row.contacted_at = body.contacted_at
-    if body.advisor_id is not None:
-        row.advisor_id = body.advisor_id
-    if row.contacted_at is not None and aware_utc(row.contacted_at) < aware_utc(row.captured_at):
-        raise HTTPException(422, 'contacted_at no puede ser anterior a la captura.')
-    row.updated_at = now
-    return row
+    outcome, affected = await save_phone(session, live, phone, body.tiktok_username,
+                                         body.source, body.captured_at or utcnow())
+    registry = await session.scalar(select(PhoneRegistry).where(PhoneRegistry.phone == phone))
+    await refresh_many(session, live, affected)
+    return registry, outcome
 
 
 async def finish_live(session, live: Live, ended_at, status) -> Live:
@@ -221,6 +311,8 @@ async def finish_live(session, live: Live, ended_at, status) -> Live:
 
 
 def contact_time_seconds(row) -> int | None:
+    """Seconds from first capture to first contact."""
     if row.contacted_at is None:
         return None
-    return max(0, int((aware_utc(row.contacted_at) - aware_utc(row.captured_at)).total_seconds()))
+    return max(0, int((aware_utc(row.contacted_at)
+                       - aware_utc(row.first_captured_at)).total_seconds()))

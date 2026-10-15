@@ -172,6 +172,10 @@ async def test_roles_and_leadsales_export_are_separated(database):
 
 
 async def test_medical360_bridge_exposes_comment_phone_state_and_monitor(database):
+    """The old bridge is now an adapter over the unified read model."""
+    from livepulse.modules.social_live.models import PhoneRegistry
+    from livepulse.modules.social_live.publisher import publish_batch
+
     factory, client = database
     now = datetime.now(timezone.utc)
     bid = await BroadcastStore(factory).connected('medical', 'room9', now - timedelta(hours=2))
@@ -187,14 +191,13 @@ async def test_medical360_bridge_exposes_comment_phone_state_and_monitor(databas
                        payload={'user': '88', 'username': 'luis'}, raw_text='Qué bonito'))
         s.add(RawEvent(event_id='a1', account_id='medical', broadcast_id=bid, type='audience',
                        occurred_at=now - timedelta(minutes=5), payload={'viewers': 40}))
-    await process_batch(factory)
+    await publish_batch(factory)
     headers = {'X-Medical360-Token': 'server-secret'}
     assert (await client.get('/v1/integrations/medical360/inbox')).status_code == 401
     assert (await client.get('/v1/integrations/medical360/monitor')).status_code == 401
 
     box = (await client.get('/v1/integrations/medical360/inbox', headers=headers)).json()
-    first = next(i for i in box['items'] if i['event_id'] == 'c1')
-    assert first['comment'].startswith('Quiero informes')
+    first = next(i for i in box['items'] if i['comment'].startswith('Quiero informes'))
     assert first['phones'] == ['+51987654321']
     assert first['tiktok_username'] == '@mariita' and first['tiktoker'] == 'Ana Ruiz'
     assert first['kind'] == 'Cliente potencial' and first['state'] == 'Por contactar'
@@ -202,17 +205,15 @@ async def test_medical360_bridge_exposes_comment_phone_state_and_monitor(databas
     assert first['received_at']['lima'].endswith('-05:00')
     only = (await client.get('/v1/integrations/medical360/inbox?only_with_phone=true',
                              headers=headers)).json()['items']
-    assert [i['event_id'] for i in only] == ['c1']
+    assert [i['comment'][:6] for i in only] == ['Quiero']
 
-    await client.put('/v1/staff/users/care1/role', json={'role': 'care'},
-                     headers={'X-Test-User': 'boss'})
-    await client.get('/v1/capabilities', headers={'X-Test-User': 'care1'})
-    await client.put('/v1/staff/users/care1/role', json={'role': 'care'},
-                     headers={'X-Test-User': 'boss'})
-    await client.patch('/v1/contacts/' + first['lead_id'], headers={'X-Test-User': 'care1'},
-                       json={'status': 'contacted', 'expected_status': 'new'})
+    # Attention is recorded on the single contact record; the bridge shows it.
+    async with factory() as s, s.begin():
+        contact = await s.scalar(select(PhoneRegistry))
+        contact.status = 'contacted'
+        contact.contacted_at = contact.first_captured_at + timedelta(minutes=5)
     box = (await client.get('/v1/integrations/medical360/inbox', headers=headers)).json()
-    first = next(i for i in box['items'] if i['event_id'] == 'c1')
+    first = next(i for i in box['items'] if i['comment'].startswith('Quiero informes'))
     assert first['state'] == 'Contactado' and first['contacted_at']['utc'] is not None
 
     table = (await client.get('/v1/integrations/medical360/monitor', headers=headers)).json()

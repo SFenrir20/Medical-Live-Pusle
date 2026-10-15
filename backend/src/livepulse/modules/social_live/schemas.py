@@ -6,8 +6,10 @@ from zoneinfo import ZoneInfo
 from pydantic import BaseModel, Field, field_validator
 
 LIMA = ZoneInfo('America/Lima')
-EventType = Literal['comment', 'like', 'view', 'viewer', 'interested', 'follow', 'donation',
-                    'share', 'direct_message', 'phone_detected', 'phone_manual']
+# viewer = a sample of CONCURRENT viewers (peak/average). unique_viewers = a total reported by
+# a real source; without it the metric is unavailable.
+EventType = Literal['comment', 'like', 'view', 'viewer', 'unique_viewers', 'interested', 'follow',
+                    'donation', 'share', 'direct_message', 'phone_detected', 'phone_manual']
 PhoneSource = Literal['comment', 'manual_capture', 'direct_message', 'speech', 'other']
 PhoneStatus = Literal['new', 'contacted', 'qualified', 'discarded']
 
@@ -53,7 +55,7 @@ class TiktokerIn(BaseModel):
 class LiveIn(Stamped):
     live_id: str | None = Field(default=None, min_length=1, max_length=40,
                                 pattern=r'^[A-Za-z0-9_-]+$')
-    tiktoker_id: str = Field(min_length=1, max_length=64)
+    tiktoker_id: str | None = Field(default=None, min_length=1, max_length=64)
     account_id: str = Field(min_length=1, max_length=32)
     started_at: datetime | None = None
     status: Literal['scheduled', 'live'] = 'live'

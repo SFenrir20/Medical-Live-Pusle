@@ -5,7 +5,8 @@ from openpyxl import Workbook
 from openpyxl.cell import WriteOnlyCell
 from sqlalchemy import select
 
-from .models import Live, LiveComment, TiktokAccount, Tiktoker
+from . import queries
+from .models import Live, LiveComment, TiktokAccount
 from .schemas import LIMA
 from .service import aware_utc
 
@@ -22,8 +23,9 @@ def text_cell(sheet, value):
 
 
 async def build_xlsx(session, live: Live) -> bytes:
-    tiktoker = await session.get(Tiktoker, live.tiktoker_id)
     account = await session.get(TiktokAccount, live.account_id)
+    # Who was in charge is decided by the shift at the time of each comment.
+    attribution = await queries.load_attribution(session, [live])
     workbook = Workbook(write_only=True)
     sheet = workbook.create_sheet('Comentarios')
     sheet.append([text_cell(sheet, h) for h in HEADERS])
@@ -36,9 +38,10 @@ async def build_xlsx(session, live: Live) -> bytes:
             break
         for r in rows:
             local = aware_utc(r.created_at).astimezone(LIMA)
+            _, tiktoker = attribution.at(live.account_id, r.created_at, live.tiktoker_id)
             sheet.append([text_cell(sheet, v) for v in (
                 local.strftime('%Y-%m-%d'), local.strftime('%H:%M:%S'), r.username, r.comment,
-                r.phone_detected, live.id, tiktoker.name if tiktoker else '',
+                r.phone_detected, live.id, tiktoker,
                 '@' + account.username if account else '')])
         last_id = rows[-1].id
     buffer = io.BytesIO()

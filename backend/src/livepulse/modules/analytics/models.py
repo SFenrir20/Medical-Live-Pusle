@@ -68,6 +68,7 @@ class UserRole(Base):
     __tablename__ = 'user_roles'
     user_id = Column(String(255), primary_key=True)
     role = Column(String(24), nullable=False)
+    display_name = Column(String(100))
 
 
 class RoleAudit(Base):

@@ -15,7 +15,8 @@ from livepulse.shared.db import Base, get_session
 MKT = '/api/marketing/tiktok'
 TABLES = [UserRole.__table__, RoleAudit.__table__, m.TiktokAccount.__table__,
           m.Tiktoker.__table__, m.Live.__table__, m.LiveComment.__table__,
-          m.LiveEventKey.__table__, m.LiveMetrics.__table__, m.CapturedPhone.__table__]
+          m.LiveEventKey.__table__, m.LiveInterestedUser.__table__, m.LiveMetrics.__table__, m.CapturedPhone.__table__,
+          m.PhoneRegistry.__table__, m.ContactAudit.__table__]
 
 
 def person(name):

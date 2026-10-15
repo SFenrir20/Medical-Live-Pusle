@@ -3,7 +3,7 @@ from typing import Literal
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
@@ -40,6 +40,22 @@ async def me(user=Depends(get_current_user), session=Depends(get_session)):
             'permissions': sorted(permissions), 'can_manage_roles': 'roles:manage' in permissions}
 
 
+class ProfileBody(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+
+
+@router.put('/me/profile')
+async def set_profile(body: ProfileBody, user=Depends(get_current_user),
+                      session=Depends(get_session)):
+    """Remember the person's display name (shown to supervisors and in attribution)."""
+    await current_role(session, user['id'])
+    row = await session.get(UserRole, user['id'])
+    if row is not None and row.display_name != body.name.strip():
+        row.display_name = body.name.strip()
+        await session.commit()
+    return {'ok': True}
+
+
 async def require_role_manager(user=Depends(get_current_user), session=Depends(get_session)):
     role = await current_role(session, user['id'])
     if 'roles:manage' not in PERMISSIONS[role]:
@@ -51,7 +67,8 @@ async def require_role_manager(user=Depends(get_current_user), session=Depends(g
 async def users(user=Depends(require_role_manager), session=Depends(get_session)):
     rows = (await session.scalars(select(UserRole).order_by(UserRole.user_id))).all()
     return {'roles': list(ROLES),
-            'items': [{'id': r.user_id, 'role': role_for(r.user_id, r.role),
+            'items': [{'id': r.user_id, 'name': r.display_name or r.user_id,
+                       'role': role_for(r.user_id, r.role),
                        'locked': r.user_id in settings.admin_user_ids} for r in rows]}
 
 

@@ -10,17 +10,14 @@
 
 ## Medical 360
 
-En LivePulse: `MEDICAL360_TOKEN=<secreto aleatorio largo>`.
-En servidor de Medical 360: `LIVEPULSE_API_URL=<URL interna de API sin /v1>` y `LIVEPULSE_MEDICAL360_TOKEN=<mismo secreto>`.
-Si se usa la web de LivePulse como proxy, la URL termina en `/api`.
-Se modificó el repositorio `reportes_streamlit`: su backend protege el puente con los permisos de Marketing existentes, y solo su servidor envía el secreto. Nunca usar VITE_* ni EXPO_PUBLIC_* para ese secreto.
-El puente es de solo lectura, con el encabezado `X-Medical360-Token`, y se consulta desde el servidor de Medical 360 (nunca desde el navegador):
+Consume la API unificada (`/api/marketing/tiktok/*`) con `Authorization: Bearer`; ver
+`docs/social-live-api.md`.
 
-- `GET /v1/integrations/medical360/lives`: métricas agregadas por LIVE.
-- `GET /v1/integrations/medical360/monitor`: una fila por cuenta (cuenta, tiktoker en vivo, inicio y fin en UTC y Lima, pico, promedio, comentarios, likes, compartidos, seguidores observados, donadores, interesados, contactos, contactos pendientes y eventos pendientes).
-- `GET /v1/integrations/medical360/inbox?since=&limit=&only_with_phone=&account_id=`: comentarios de LIVE con texto original, teléfono(s), usuario de TikTok, tiktoker responsable, tipo, estado, hora de ingreso y hora de contacto.
-
-`monitor` e `inbox` **sí entregan comentarios y teléfonos**: tratar el token como secreto, no registrarlo y definir la retención en Medical 360. Para tiempo real, consultar cada 3-5 s y reemplazar la lista con la última respuesta (los estados cambian cuando Atención contacta). Los mensajes directos no tienen fuente conectada y se devuelven como `null`.
+En LivePulse: `MEDICAL360_TOKEN=<secreto aleatorio largo>` (y `MEDICAL360_EXPORT_TOKEN` si se
+exportan comentarios). En el servidor de Medical 360: `LIVEPULSE_API_URL=<origen de la API>` y
+`LIVEPULSE_MEDICAL360_TOKEN=<el mismo secreto>`. Nunca usar `VITE_*` ni `EXPO_PUBLIC_*` para ese
+secreto. Las rutas anteriores `/v1/integrations/medical360/*` siguen respondiendo, pero están
+**obsoletas**: son adaptadores del mismo modelo y se retirarán.
 
 ## Respaldo y recuperación
 

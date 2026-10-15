@@ -1,138 +1,197 @@
-# Integración Medical Social Live ↔ Medical 360
+# Medical Social Pulse ↔ Medical 360: flujo de datos único
 
 ```
-TikTok Live → Medical Social Live → API → PostgreSQL → API → Medical 360
+TikTok ─► monitor ─► raw_events ─► worker (publicación) ─► lives / live_metrics /
+                     (registro de        │                   phone_registry / captured_phones
+                      eventos)           └── idempotente      │
+                                           (published_at)     ▼
+                      Medical Social Pulse ◄── API ──► PostgreSQL ◄── API ──► Medical 360
 ```
 
-Ningún frontend habla con el otro. Social Live **escribe**, Medical 360 **lee**. Las rutas
-nuevas conviven con las anteriores (`/v1/...`), que no cambian.
+Ningún frontend habla con otro. Todo pasa por la API.
 
-## Autenticación y permisos
+## Fuente de datos principal
 
-Cabecera `Authorization: Bearer <token>`. Tokens por variable de entorno; si está vacío, esa
-credencial queda deshabilitada.
-
-| Variable | Permiso |
-|---|---|
-| `SOCIAL_LIVE_TOKEN` | `ingest`: crear lives, eventos y teléfonos, y actualizar el contacto |
-| `MEDICAL360_TOKEN` | `read`: consultar estadísticas |
-| `MEDICAL360_EXPORT_TOKEN` | `read` + `export`: además descargar comentarios |
-| `COMMENTS_RETENTION_DAYS` | días de retención de comentarios (por defecto 30) |
-
-401 sin token o inválido; 403 si el token no tiene el permiso. Usar secretos largos y
-aleatorios, guardados solo en servidores. **Un token de servicio no debe ir dentro de un
-frontend de navegador**: el frontend de Social Live debe autenticar personas (login) contra
-el backend, o hablar con un servidor suyo que guarde el token.
-
-## Personas y roles (Clerk)
-
-Medical Social Pulse inicia sesión con Clerk y manda su JWT en `Authorization: Bearer`.
-El backend lo verifica (JWKS) y busca el **rol guardado en el servidor**; no confía en el
-navegador ni en metadatos de Clerk.
-
-| Rol | Pantalla | Permisos |
+| Capa | Tablas | Quién escribe |
 |---|---|---|
-| `agente_ventas` | solo su perfil | sin acceso a estadísticas de marketing |
-| `gerente` | marketing | leer y exportar |
-| `jefe_marketing` | pantalla del jefe de marketing | leer y exportar |
-| `supervisor` | ambas | leer, exportar y estado del monitor |
+| Registro de eventos (verdad cruda) | `raw_events` (+ `broadcasts`, estado del monitor) | monitor |
+| Modelo de lectura (lo que consumen las pantallas) | `lives`, `live_metrics`, `live_comments` (temporal), `phone_registry` (contacto único), `captured_phones` (apariciones), `contact_audit` | worker y API |
+| Turnos | `shifts` (independiente del LIVE) | app de marcación |
 
-`admin` (variable `ADMIN_USER_IDS`) es el dueño técnico: asigna roles. Quien entra por primera
-vez queda como `agente_ventas`. La matriz está en `modules/identity/roles.py`.
+El worker pliega cada evento de `raw_events` en el modelo de lectura **una sola vez**: la marca
+`raw_events.published_at` es permanente (sobrevive a la limpieza). El historial anterior se
+convierte en el primer ciclo del worker sin duplicar nada. El modelo analítico anterior
+(`event_facts`, `leads`, `/v1/analytics`, `/v1/contacts`) queda como **legado** para la app móvil
+antigua: se alimenta del mismo registro de eventos, pero ya no es la fuente de estados de
+contacto. `/v1/integrations/medical360/{monitor,inbox}` ahora son adaptadores del modelo único.
 
-- `GET /api/auth/me` → `{ id, role, screens, permissions, can_manage_roles }`
-- `GET /api/auth/users` / `PUT /api/auth/users/{id}/role` → solo admin
+## Autenticación
 
-Las rutas de consulta `/api/marketing/tiktok/*` aceptan un token de servicio (servidor de
-Medical 360) o una persona con el permiso. Las rutas de ingestión `/api/social-live/*` solo
-aceptan el token de servicio: ninguna persona puede escribir eventos.
+Cabecera `Authorization: Bearer <token>`.
 
-## Ingestión (Medical Social Live) — `/api/social-live`
+| Quién | Credencial | Alcance |
+|---|---|---|
+| Captura (servidor de Social Live) | `SOCIAL_LIVE_TOKEN` | `ingest`: crear lives, eventos, teléfonos |
+| Medical 360 (servidor) | `MEDICAL360_TOKEN` | `read` + `contacts:read_all` |
+| Medical 360, exportación | `MEDICAL360_EXPORT_TOKEN` | además `export` |
+| Personas (Clerk) | JWT de sesión; rol guardado en el servidor | ver tabla de roles |
 
-| Método y ruta | Uso |
+Los tokens de servicio **nunca** van al navegador. Ninguna persona puede escribir eventos
+(`ingest`). Un token vacío queda deshabilitado.
+
+## Roles y permisos de atención
+
+| Rol | Pantalla | Estadísticas | Contactos |
+|---|---|---|---|
+| `agente_ventas` | su perfil | — | ve los libres y los suyos; tomar, liberar, cambiar estado de los suyos |
+| `gerente`, `jefe_marketing` | marketing | leer y exportar | solo conteos (no ve teléfonos) |
+| `supervisor` | ambas | leer y exportar | ve todos; asigna a cualquiera; historial |
+| `admin` (`ADMIN_USER_IDS`) | ambas | todo | todo + gestión de roles |
+
+Permisos: `contacts:read`, `contacts:claim`, `contacts:update`, `contacts:read_all`,
+`contacts:assign_any` (más `read`, `export`, `roles:manage`). Matriz en
+`modules/identity/roles.py`. Se validan en el servidor.
+
+Atención (`/api`): `GET /inbox`, `PATCH /leads/{id}` (`action: claim|release|assign`,
+`status`, `expected_status`, `expect_unassigned`), `GET /leads/summary`, `GET /team`,
+`GET /leads/{id}/history`, `GET /auth/me`, `PUT /auth/me/profile`.
+
+- Tomar un contacto es una actualización condicionada: si dos asesores lo intentan a la vez,
+  uno recibe `409`. Cambiar el estado de un contacto libre lo toma.
+- La fecha del **primer contacto** (`contacted_at`) se guarda una sola vez y no cambia al
+  reabrir el estado.
+- Cada cambio queda en `contact_audit` (quién, qué, antes, después, cuándo).
+- Un contacto de otra persona no aparece para un agente (`404`).
+
+## Contacto único y primera captura
+
+- Un teléfono (E.164) es **un contacto** en `phone_registry`, creado en su **primera captura**
+  en cualquier cuenta y cualquier LIVE. La unicidad la garantiza la base de datos (inserciones
+  simultáneas: una gana, la otra es una aparición posterior).
+- Las apariciones posteriores se guardan en `captured_phones` (`is_new = false`).
+- Si llega tarde un evento con hora **anterior**, pasa a ser la primera captura y la anterior
+  se degrada.
+- Reportes por día, semana, mes, hora, cuenta y TikToker usan la **fecha de primera captura**
+  en calendario de Lima (un contacto a las 23:50 de Lima cuenta en ese día).
+
+## Transmisión, turnos y atribución
+
+Un live **no pertenece a una persona**: transmisión (`lives`), turnos (`shifts`) y atribución
+(por intervalo `[inicio, fin)`) son independientes. Sin evidencia de turno: **«Sin asignar»**
+(`lives.tiktoker_id` es opcional y solo declara un tramo sin turno). `GET /lives/{id}` incluye
+`intervals` y `tiktokers`. Los contadores a nivel de live se reparten por tiempo de turno solo
+cuando se filtra por persona; los teléfonos se atribuyen por la hora de su primera captura.
+
+## Ingestión — `/api/social-live` (token `ingest`)
+
+`POST /accounts`, `POST /tiktokers`, `POST /lives`, `POST /lives/{id}/events` (uno o
+`{"events": [...]}` hasta 500), `POST /lives/{id}/comments`, `POST /lives/{id}/phones`,
+`PATCH /phones/{contactId}`, `PATCH /lives/{id}/finish`.
+
+`event_type`: `comment`, `like`, `view`, `viewer`, `unique_viewers`, `interested`, `follow`,
+`donation`, `share`, `direct_message`, `phone_detected`, `phone_manual`.
+
+- `viewer`: muestra de espectadores **simultáneos** (alimenta pico y promedio).
+- `unique_viewers`: total de espectadores únicos **solo si una fuente real lo reporta**.
+- `direct_message`: cuenta lo que el emisor informa; no implica captura de mensajes privados.
+- `timestamp` sin zona = hora de Lima. No se aceptan fechas futuras.
+- `event_id` hace idempotentes los reintentos.
+
+## Consulta — `/api/marketing/tiktok` (token `read`, o rol)
+
+`overview`, `lives`, `lives/{id}`, `lives/{id}/metrics`, `lives/{id}/comments`,
+`lives/{id}/phones`, `lives/{id}/comments/export` (XLSX en memoria, permiso `export`),
+`ranking`, `accounts/performance`, `hourly-performance`, `contact-performance`, y para
+Medical 360: `monitor`, `inbox` y `numbers` (los dos últimos con `contacts:read_all`).
+Filtros: `date_from`, `date_to` (fecha o ISO; sin zona = Lima), `tiktoker_id`, `account_id`.
+
+## Definiciones (cada cifra tiene fuente o es «no disponible»)
+
+| Cifra | Significado |
 |---|---|
-| `POST /accounts` | crear o actualizar cuenta TikTok (`id`, `name`, `username`, `type`, `active`) |
-| `POST /tiktokers` | crear o actualizar TikToker (`id`, `name`, `active`) |
-| `POST /lives` | crear live (`live_id` opcional, `tiktoker_id`, `account_id`, `started_at`, `status`) |
-| `POST /lives/{id}/events` | un evento o `{"events": [...]}` (hasta 500) |
-| `POST /lives/{id}/comments` | atajo de un comentario |
-| `POST /lives/{id}/phones` | registrar teléfono (detectado o manual) |
-| `PATCH /phones/{phoneId}` | `status`, `advisor_id`, `contacted_at` |
-| `PATCH /lives/{id}/finish` | cierra el live y consolida métricas |
+| `peak_viewers` | mayor audiencia **simultánea** observada |
+| `average_viewers` | promedio de las muestras simultáneas; `null` sin muestras |
+| `unique_viewers` | `null` = no disponible (no hay fuente) |
+| `direct_messages_reported` / `direct_messages_capture` | lo informado / `false` mientras no exista captura de DM |
+| `phones` | contactos únicos por fecha de **primera captura** |
+| `phone_mentions` | todas las apariciones |
+| `conversion` | contactos en `qualified` ÷ contactos capturados |
+| `leads_per_hour` | contactos ÷ horas en vivo (mínimo 1 minuto) |
+| contacto → tiempo | `contacted_at − first_captured_at`; porcentajes sobre contactados |
 
-Evento:
+## Retención (política explícita)
 
-```json
-{ "event_type": "comment", "username": "usuario123",
-  "text": "quiero información 987654321", "timestamp": "2026-10-15T19:23:10",
-  "event_id": "opcional-para-reintentos" }
-```
+`COMMENTS_RETENTION_DAYS` (30). Cada día se eliminan `live_comments` vencidos. **No** se tocan
+lives, métricas, contactos, auditoría ni rankings.
 
-`event_type`: `comment`, `like`, `view`, `viewer`, `interested`, `follow`, `donation`, `share`,
-`direct_message`, `phone_detected`, `phone_manual`.
+- Las claves de idempotencia de un live se conservan mientras pueda recibir eventos; solo se
+  borran las de lives terminados/cancelados, que ya rechazan eventos (`409`).
+- Un evento con `timestamp` anterior a la ventana se **rechaza** (`409 EVENT_TOO_OLD`).
+- El historial del monitor se convierte una vez (`published_at`); no se re-suma tras la limpieza.
+- Comentarios vencidos: `410 COMMENTS_RETENTION_EXPIRED` (lista y exportación).
 
-- `like`, `view`, `share`, `follow`, `donation`: `value` suma esa cantidad (por defecto 1).
-- `viewer`: `value` es el total de espectadores únicos conocido; se conserva el **máximo**.
-- `comment`: requiere `username` y `text`. El servidor detecta teléfonos (también los
-  disfrazados como `985//857#968`) y el interés, y crea los teléfonos capturados.
-- `phone_detected`/`phone_manual`: llevan `phone` (o `text`) y `username`.
-- **`event_id` hace idempotentes los reintentos.** Sin él, reenviar un contador lo suma de nuevo.
-- `timestamp` sin zona horaria se interpreta como hora de Lima. No se aceptan fechas futuras
-  (más de 5 minutos). Un live terminado acepta eventos hasta 5 minutos después de su fin.
-- Un mismo teléfono en un mismo live es un solo lead.
+## Rutas públicas (proxy)
 
-Estados del teléfono: `new`, `contacted`, `qualified`, `discarded`. Al pasar a
-`contacted`/`qualified` se fija `contacted_at` (una sola vez);
-`contact_time_seconds = contacted_at − captured_at`.
-
-## Consulta (Medical 360) — `/api/marketing/tiktok`
-
-Filtros comunes: `date_from`, `date_to` (fecha `YYYY-MM-DD`, o ISO; sin zona = Lima; `date_to`
-incluye el día completo), `tiktoker_id`, `account_id`. Las horas se devuelven en UTC y en Lima.
-
-| Ruta | Devuelve |
+| Pública | Backend |
 |---|---|
-| `GET /overview` | lives, views, comments, likes, shares, followers, interested, donations, phones, `leads_per_hour` |
-| `GET /lives` | lista paginada (`status`, `limit`, `offset`) |
-| `GET /lives/{id}` | detalle: métricas, resumen de teléfonos, `comments_available` |
-| `GET /lives/{id}/metrics` | métricas consolidadas |
-| `GET /lives/{id}/comments` | comentarios paginados |
-| `GET /lives/{id}/phones` | teléfonos con `contact_time_seconds` |
-| `GET /lives/{id}/comments/export` | XLSX en memoria (requiere `export`) |
-| `GET /ranking?sort_by=` | TikTokers por `phones`, `leads_per_hour`, `views`, `interested`, `conversion` |
-| `GET /accounts/performance` | comparación entre cuentas |
-| `GET /hourly-performance?granularity=` | `hour_of_day` (con mejor y peor hora), `day`, `week`, `month` |
-| `GET /contact-performance` | promedio, mediana, mínimo, máximo, % por tramo y sin contactar |
+| `/api/health` | `/health` |
+| `/api/v1/...` | `/v1/...` (app anterior) |
+| `/api/auth`, `/api/inbox`, `/api/leads`, `/api/team`, `/api/marketing/...`, `/api/social-live/...` | igual |
 
-### Exportación y retención
+Social Pulse (`apps/social-pulse`, puerto `SOCIAL_PORT`) usa el mismo origen: no necesita CORS.
+En otro origen (Vite en desarrollo) añadirlo a `CORS_ORIGINS` y `CLERK_AUTHORIZED_PARTIES`.
 
-El XLSX se arma en memoria y no se guarda. Columnas: fecha, hora, usuario TikTok, comentario,
-teléfono detectado, live, TikToker, cuenta. El texto se escribe como cadena literal, nunca como
-fórmula.
+## Medical 360
 
-Cada día el worker elimina `live_comments` (y las claves de reintento) con más de
-`COMMENTS_RETENTION_DAYS`. **No** elimina lives, `live_metrics`, `captured_phones` ni rankings.
-Si se pide el detalle de un live ya purgado: HTTP **410** con
+`reportes_streamlit/services/livepulse_service.py` consume `/api/marketing/tiktok/*` con Bearer.
+`LIVEPULSE_API_URL` = origen de la API (se tolera un `/api` final) y
+`LIVEPULSE_MEDICAL360_TOKEN` = `MEDICAL360_TOKEN` del servidor LivePulse. Las cifras ya llegan
+calculadas (un número se cuenta una vez, en su primera captura); Medical 360 no las rederiva.
 
-```json
-{ "detail": { "code": "COMMENTS_RETENTION_EXPIRED",
-  "message": "Los comentarios detallados de este Live ya no están disponibles. Las métricas históricas permanecen disponibles." } }
-```
+## Migración y conversión de datos (0006)
 
-## Definiciones que conviene validar
+Conserva los datos: copia antes de eliminar. Convierte `captured_phones` en un contacto por
+número (la aparición más antigua es la primera captura; gana el estado más avanzado y el primer
+contacto más antiguo), incorpora los contactos del modelo analítico anterior, crea los lives de
+las transmisiones, marca como publicados los eventos ya plegados y mueve el antiguo
+«unique_viewers» (que era el pico simultáneo) a `peak_viewers`. Es idempotente
+(`modules/social_live/backfill.py`).
 
-- **conversion** = teléfonos en estado `qualified` ÷ teléfonos capturados.
-- **leads_per_hour** = teléfonos ÷ horas en vivo (mínimo 1 minuto de duración).
-- **interested_viewers**: un usuario cuenta una vez por live al comentar con interés.
-- **Porcentajes de contacto**: sobre los teléfonos ya contactados.
-- **Peor hora**: solo entre horas en las que hubo algún live.
-- `unique_viewers` del resumen suma el máximo de cada live; un mismo usuario en dos lives
-  cuenta dos veces.
-- Las métricas del overview/ranking se filtran por la fecha de inicio del live; las de hora y
-  contacto, por la fecha de captura del teléfono.
+## Correcciones de integración (0007)
 
-## Pendiente
+- Los filtros `date_from` y `date_to` son independientes. Una fecha sin hora incluye el día
+  completo en Lima; una fecha ISO conserva su hora. Un rango invertido devuelve `422`.
+- `/api/inbox` filtra permisos, `scope`, `phone_only` y `exclude_discarded` antes de paginar.
+  Acepta `limit` (hasta 200) y `offset`; devuelve `total` y `next_offset`. La interfaz solicita
+  el filtro de teléfonos al servidor y permite cargar las páginas siguientes.
+- La conversión 0006 combina el historial legado incluso cuando el teléfono ya existe en el
+  registro: conserva la primera captura, el primer contacto documentado, el estado más avanzado
+  y el asesor ya asignado. No inventa una fecha de atención cuando no hay evidencia.
+- La migración 0007 crea `live_interested_users`, con una clave única por transmisión y usuario.
+  La limpieza de comentarios no elimina ese registro: un mismo usuario interesado se cuenta una
+  vez incluso al reconstruir eventos antiguos en varios lotes o reiniciar el worker.
+- La generación SQL sin conexión valida la estructura, pero no sustituye ejecutar las
+  migraciones sobre PostgreSQL. La conversión de datos 0006 requiere Alembic en modo conectado.
 
-- El monitor de TikTok actual (`raw_events`/`event_facts`) aún escribe en su propio modelo.
-  Falta un adaptador que lo publique en estas tablas (o que Social Live use esta API).
-- Login de usuarios de Social Live (`/auth/login` de su maqueta) y CORS para su origen.
+## Pasos de despliegue
+
+1. Respaldar la base (`python infra/scripts/backup.py`).
+2. Variables: `MEDICAL360_TOKEN`, `MEDICAL360_EXPORT_TOKEN`, `SOCIAL_LIVE_TOKEN` (si se usa
+   captura externa), `ADMIN_USER_IDS`, `CLERK_ISSUER`, `CLERK_AUTHORIZED_PARTIES` (incluir el
+   origen de Social Pulse), `VITE_CLERK_PUBLISHABLE_KEY`, `SOCIAL_PORT`, `CORS_ORIGINS` si aplica.
+3. Reconstruir y desplegar `api`, `worker`, `monitor` y `social` (no basta reiniciar). La API
+   aplica `alembic upgrade head` al iniciar.
+4. `python -m alembic current` debe mostrar `0007 (head)`.
+5. Esperar el primer ciclo del worker (convierte el historial) y revisar logs.
+6. Comprobar: `/api/health`, `/api/auth/me` sin sesión → `401` (no `404`), y en Marketing que el
+   conteo de teléfonos coincide con el registro.
+7. En Medical 360: ajustar `LIVEPULSE_API_URL` y token, y redesplegar.
+
+## Fuera de alcance / pendiente
+
+- **Mensajes directos**: no hay integración de lectura; se muestran como «no disponible».
+- **Espectadores únicos**: sin fuente.
+- **Leadsales**: el CSV del modelo anterior sigue en `/v1/contacts/export/leadsales` (modelo
+  legado); no está conectado al registro único ni se ha probado la importación.
+- Ajustes de pantalla (notificaciones, canales): locales.
+- Historial anterior a la ventana: se convierten métricas y teléfonos, no el texto de comentarios.
