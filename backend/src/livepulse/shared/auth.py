@@ -17,7 +17,8 @@ def jwks_client(issuer: str):
 
 
 def clerk_configured() -> bool:
-    return settings.clerk_issuer.rstrip("/").startswith("https://")         and bool(settings.clerk_authorized_parties)
+    return (settings.clerk_issuer.rstrip("/").startswith("https://")
+            and bool(settings.clerk_authorized_parties))
 
 
 def verify_token(token: str) -> dict:
