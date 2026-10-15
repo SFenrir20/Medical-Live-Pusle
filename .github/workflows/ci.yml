@@ -1,4 +1,4 @@
-name: LivePulse CI
+name: Medical Social Pulse CI
 
 on:
   pull_request:
@@ -55,7 +55,7 @@ jobs:
                   rows = (await s.execute(text(
                       "SELECT tablename FROM pg_tables WHERE schemaname='public' ORDER BY 1"))).scalars().all()
                   print("tables:", rows)
-                  assert {"broadcasts", "raw_events", "idempotency_keys", "shifts", "event_facts", "leads", "monitor_states", "user_roles", "lives", "live_metrics", "live_comments", "live_event_keys", "captured_phones", "phone_registry", "tiktok_accounts", "tiktokers"} <= set(rows), rows
+                  assert {"broadcasts", "raw_events", "event_facts", "leads", "monitor_states", "user_roles", "lives", "live_metrics", "live_comments", "live_event_keys", "captured_phones", "phone_registry", "tiktok_accounts", "tiktokers"} <= set(rows), rows
           asyncio.run(main())
           EOF
         env:
@@ -65,31 +65,6 @@ jobs:
         with:
           name: backend-test-results
           path: backend/test-results.xml
-
-  mobile:
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    defaults:
-      run:
-        working-directory: apps/mobile
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '24'
-          cache: npm
-          cache-dependency-path: apps/mobile/package-lock.json
-      - run: npm ci --no-audit --no-fund
-      - run: npm run lint
-      - run: npm run typecheck
-      - run: npm test -- --ci --maxWorkers=2
-      - run: npx expo install --check
-      - run: npx expo export --platform web --max-workers 2
-      - uses: actions/upload-artifact@v4
-        with:
-          name: livepulse-web
-          path: apps/mobile/dist
-          if-no-files-found: error
 
   social:
     runs-on: ubuntu-latest
@@ -115,7 +90,7 @@ jobs:
           VITE_API_URL: /api
 
   docker:
-    needs: [backend, mobile, social]
+    needs: [backend, social]
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -129,15 +104,15 @@ jobs:
       - name: Verify HTTP and database
         run: |
           python infra/smoke.py
-          docker compose -f infra/compose.yaml exec -T db psql -U livepulse -d livepulse -v ON_ERROR_STOP=1 -c 'SELECT count(*) FROM shifts;'
+          docker compose -f infra/compose.yaml exec -T db psql -U livepulse -d livepulse -v ON_ERROR_STOP=1 -c 'SELECT count(*) FROM lives;'
       - name: Export Docker images
         if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
-        run: docker save medical-livepulse-api:local medical-livepulse-web:local medical-livepulse-monitor:local medical-livepulse-worker:local | gzip > livepulse-images.tar.gz
+        run: docker save medical-livepulse-api:local medical-social-pulse-web:local medical-livepulse-monitor:local medical-livepulse-worker:local | gzip > social-pulse-images.tar.gz
       - uses: actions/upload-artifact@v4
         if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
         with:
-          name: livepulse-docker-images
-          path: livepulse-images.tar.gz
+          name: social-pulse-docker-images
+          path: social-pulse-images.tar.gz
           retention-days: 7
           compression-level: 0
       - name: Service logs

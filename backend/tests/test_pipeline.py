@@ -1,4 +1,4 @@
-"""PostgreSQL acceptance tests for lifecycle, attribution, processing and staff access."""
+"""PostgreSQL acceptance tests for lifecycle, processing and staff access."""
 import asyncio
 import os
 from datetime import datetime, timedelta, timezone
@@ -14,10 +14,9 @@ from livepulse.entrypoints.api import app
 from livepulse.entrypoints.worker import process_batch
 from livepulse.modules.analytics.models import EventFact, Lead, LeadAlias, LeadPhone, UserRole
 from livepulse.modules.analytics.processor import handle_event
-from livepulse.modules.analytics.reporting import attribution, lives
+from livepulse.modules.analytics.reporting import lives
 from livepulse.modules.broadcasts.lifecycle import BroadcastStore
 from livepulse.modules.broadcasts.models import Broadcast, RawEvent
-from livepulse.modules.shifts.models import Shift
 from livepulse.shared.auth import get_current_user
 from livepulse.shared.config import settings
 from livepulse.shared.db import Base, get_session
@@ -82,16 +81,12 @@ async def test_lifecycle_survives_restart_room_change_and_offline_grace(database
         assert (await s.get(Broadcast, new)).end_confirmed is True
 
 
-async def test_pipeline_retries_contacts_metrics_and_boundary_attribution(database):
+async def test_pipeline_retries_contacts_and_metrics(database):
     factory, _ = database
     broadcast_id = await BroadcastStore(factory).connected('medical', 'room1', T)
     async with factory() as s, s.begin():
         broadcast = await s.get(Broadcast, broadcast_id)
         broadcast.ended_at = T + timedelta(hours=3, minutes=20)
-        s.add_all([Shift(id='a', user_id='ana', account_id='medical', started_at=T,
-                         ended_at=T + timedelta(hours=1), end_reason='handover', closed_by='bea'),
-                   Shift(id='b', user_id='bea', account_id='medical', started_at=T + timedelta(hours=1),
-                         ended_at=T + timedelta(hours=3), end_reason='manual', closed_by='bea')])
         for i, minute in enumerate([15, 60, 190]):
             s.add(RawEvent(event_id=f'e{i}', account_id='medical', broadcast_id=broadcast_id,
                           type='comment', occurred_at=T + timedelta(minutes=minute),
@@ -112,11 +107,7 @@ async def test_pipeline_retries_contacts_metrics_and_boundary_attribution(databa
         assert report['metrics']['interested_users'] == 1
         assert report['metrics']['peak_viewers'] == 50
         assert report['total_unique_viewers'] is None
-        result = await attribution(s, broadcast_id)
-        by_user = {r['user_id']: r['comments'] for r in result['by_user']}
-        assert by_user == {'ana': 1, 'bea': 1, None: 1}
-        assert result['intervals'][-1]['user_id'] is None
-        assert result['intervals'][-1]['end'] - result['intervals'][-1]['start'] == timedelta(minutes=20)
+
 
 
 async def test_failed_batch_rolls_back_and_retry_has_one_fact(database):
@@ -180,8 +171,6 @@ async def test_medical360_bridge_exposes_comment_phone_state_and_monitor(databas
     now = datetime.now(timezone.utc)
     bid = await BroadcastStore(factory).connected('medical', 'room9', now - timedelta(hours=2))
     async with factory() as s, s.begin():
-        s.add(Shift(id='s1', user_id='ana', display_name='Ana Ruiz', account_id='medical',
-                    started_at=now - timedelta(hours=3)))
         s.add(RawEvent(event_id='c1', account_id='medical', broadcast_id=bid, type='comment',
                        occurred_at=now - timedelta(minutes=20),
                        payload={'user': '77', 'username': 'mariita', 'nickname': 'Mariita'},
@@ -199,7 +188,7 @@ async def test_medical360_bridge_exposes_comment_phone_state_and_monitor(databas
     box = (await client.get('/v1/integrations/medical360/inbox', headers=headers)).json()
     first = next(i for i in box['items'] if i['comment'].startswith('Quiero informes'))
     assert first['phones'] == ['+51987654321']
-    assert first['tiktok_username'] == '@mariita' and first['tiktoker'] == 'Ana Ruiz'
+    assert first['tiktok_username'] == '@mariita' and first['tiktoker'] == 'Sin asignar'
     assert first['kind'] == 'Cliente potencial' and first['state'] == 'Por contactar'
     assert first['origin'] == 'live' and first['contacted_at']['utc'] is None
     assert first['received_at']['lima'].endswith('-05:00')
@@ -218,7 +207,7 @@ async def test_medical360_bridge_exposes_comment_phone_state_and_monitor(databas
 
     table = (await client.get('/v1/integrations/medical360/monitor', headers=headers)).json()
     row = next(a for a in table['accounts'] if a['account_id'] == 'medical')
-    assert row['on_air'] and row['tiktoker'] == 'Ana Ruiz' and row['account'] == '@medical.cirugias'
+    assert row['on_air'] and row['tiktoker'] is None and row['account'] == '@medical.cirugias'
     assert row['comments'] == 2 and row['peak_viewers'] == 40
     assert row['contacts'] == 1 and row['contacts_pending'] == 0
     assert row['started_at']['lima'].endswith('-05:00') and row['ended_at']['utc'] is None

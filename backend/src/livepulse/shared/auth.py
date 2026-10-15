@@ -22,7 +22,7 @@ def clerk_configured() -> bool:
 
 
 def verify_token(token: str) -> dict:
-    """Validate a Clerk session JWT and return the person (id/accounts/status)."""
+    """Validate a Clerk session JWT and return the authenticated identity."""
     issuer = settings.clerk_issuer.rstrip("/")
     if not clerk_configured():
         raise HTTPException(503, "Clerk no está configurado en el servidor.")
@@ -33,7 +33,7 @@ def verify_token(token: str) -> dict:
             options={"require": ["exp", "iat", "nbf", "iss", "sub", "sid"],
                      "verify_aud": False},
         )
-        # Native sessions may omit azp. When present, require an explicit origin match.
+        # When present, azp must match an explicitly authorized origin.
         if "azp" in claims and claims["azp"] not in settings.clerk_authorized_parties:
             raise jwt.InvalidTokenError("Untrusted authorized party")
         if not claims["sub"] or not claims["sid"] or claims.get("sts") == "pending":
@@ -43,13 +43,7 @@ def verify_token(token: str) -> dict:
     except jwt.PyJWTError as exc:
         raise HTTPException(401, "Sesión inválida o vencida.",
                             headers={"WWW-Authenticate": "Bearer"}) from exc
-    sub = claims["sub"]
-    if sub in settings.livepulse_user_accounts:
-        accounts = settings.livepulse_user_accounts[sub]
-    else:
-        accounts = list(settings.default_accounts)
-    return {"id": sub, "accounts": accounts,
-            "status": "approved" if accounts else "pending"}
+    return {"id": claims["sub"]}
 
 
 def get_current_user(credentials=Depends(security)):

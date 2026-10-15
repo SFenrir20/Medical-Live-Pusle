@@ -5,8 +5,8 @@ from datetime import timedelta
 from sqlalchemy import select, text
 
 from ...shared.config import settings
+from ...shared.locks import lock
 from ..analytics.models import MonitorState
-from ..shifts.service import lock
 from .models import Broadcast
 
 

@@ -14,8 +14,8 @@ from sqlalchemy import func, select
 from ...shared.auth import get_current_user
 from ...shared.config import settings
 from ...shared.db import get_session
+from ...shared.locks import lock
 from ..broadcasts.models import RawEvent
-from ..shifts.service import lock
 from .access import register, require_role
 from .classify import phones_in
 from .medical360 import inbox as m360_inbox
@@ -31,7 +31,7 @@ from .models import (
     UserRole,
 )
 from .processor import contact_for
-from .reporting import attribution, lives
+from .reporting import lives
 
 router = APIRouter(prefix='/v1')
 marketing = require_role('marketing')
@@ -48,11 +48,6 @@ async def capabilities(user=Depends(get_current_user), session=Depends(get_sessi
 async def report(account_id: str | None = None, limit: int = Query(20, ge=1, le=100),
                  offset: int = Query(0, ge=0), user=Depends(marketing), session=Depends(get_session)):
     return await lives(session, account_id, limit, offset)
-
-
-@router.get('/analytics/lives/{broadcast_id}/attribution')
-async def match(broadcast_id: int, user=Depends(marketing), session=Depends(get_session)):
-    return await attribution(session, broadcast_id)
 
 
 async def integration(x_medical360_token: str = Header(default='')):

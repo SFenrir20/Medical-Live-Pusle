@@ -49,7 +49,7 @@ class Tiktoker(Base):
 class Live(Base):
     __tablename__ = 'lives'
     id = Column(String(40), primary_key=True)
-    # Optional: who worked is derived from shifts by time (see queries.attribution).
+    # Optional explicit LIVE host. Missing assignment remains unassigned.
     tiktoker_id = Column(String(64), ForeignKey('tiktokers.id'))
     account_id = Column(String(32), ForeignKey('tiktok_accounts.id'), nullable=False)
     started_at = Column(DateTime(timezone=True), nullable=False)

@@ -1,55 +1,27 @@
 # Medical Social Pulse
 
-Aplicación web para monitorear comentarios de transmisiones en vivo y mensajes sociales de
-TikTok e Instagram. Construida con React, Vite, TypeScript y Tailwind CSS.
+Único frontend web del proyecto, construido con React, Vite, TypeScript y Tailwind CSS.
+Incluye paneles de Marketing y atención de contactos, con acceso mediante Clerk.
+El backend decide los roles y permisos; el navegador no asigna privilegios.
 
 ## Desarrollo
 
-El servidor de desarrollo de Figma Make se inicia automáticamente. Fuera de Figma Make:
+Copiar `.env.example` a `.env.local` y configurar `VITE_CLERK_PUBLISHABLE_KEY`
+y `VITE_API_URL=http://localhost:8000/api`.
 
-```bash
-pnpm install
+```sh
+pnpm install --frozen-lockfile
 pnpm dev
+pnpm build
 ```
 
-## Acceso
+Vite usa el puerto 8443 por defecto. El backend debe autorizar ese origen en Clerk y CORS.
+`pnpm build` valida TypeScript y genera `dist`. La sesión la gestiona el SDK de Clerk.
 
-El inicio de sesión lo gestiona **Clerk** (usuario o correo, Google, recuperación de contraseña).
-El **rol** lo asigna el backend (`GET /api/auth/me`); el navegador nunca decide permisos.
+## Docker
 
-| Rol | Pantalla |
-|---|---|
-| `agente_ventas` | Solo su perfil (vista de agente) |
-| `gerente` | Marketing |
-| `jefe_marketing` | Pantalla del jefe de marketing |
-| `supervisor` | Ambas, con selector de vista |
+El servicio `web` de `../../infra/compose.yaml` construye esta carpeta y sirve en el puerto
+interno 80. Usa `/api` mediante Nginx. La clave pública es un argumento de compilación:
+si cambia, reconstruir. Los secretos de integración pertenecen exclusivamente al backend.
 
-Una persona que entra por primera vez queda como `agente_ventas`. El administrador técnico
-(`ADMIN_USER_IDS` del backend) asigna los demás roles con `PUT /api/auth/users/{id}/role`.
-
-## Variables de entorno
-
-Copia `.env.example` a `.env.local`:
-
-```env
-VITE_CLERK_PUBLISHABLE_KEY=pk_test_xxxxx   # solo la clave publicable
-VITE_API_URL=http://localhost:8000/api
-```
-
-La instancia de Clerk debe tener los mismos `CLERK_ISSUER` y `CLERK_AUTHORIZED_PARTIES`
-(origen de esta web) configurados en el backend. Para que solo entren personas autorizadas,
-desactiva el registro abierto en Clerk o usa invitaciones.
-
-## Comandos
-
-```bash
-pnpm dev          # Servidor Vite
-pnpm build        # Typecheck y build de producción
-pnpm format       # Formatea src/
-pnpm format:check # Verifica el formato de src/
-```
-
-## Sesión
-
-La sesión web se persiste en `localStorage`. Al cerrar sesión se eliminan el token y el usuario
-guardados.
+Ver `../../docs/social-live-api.md` para permisos, datos conectados y límites de captura.

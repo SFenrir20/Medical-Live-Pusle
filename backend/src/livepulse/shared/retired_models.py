@@ -1,9 +1,14 @@
-from sqlalchemy import CheckConstraint, Column, DateTime, Index, String, text
+"""Retired attendance schema, imported ONLY by Alembic.
 
-from ...shared.db import Base
+Keep existing tables and migration history intact without exposing attendance in the app.
+Do not import this module from runtime services.
+"""
+from sqlalchemy import CheckConstraint, Column, DateTime, Index, String, func, text
+
+from .db import Base
 
 
-class Shift(Base):
+class ArchivedShift(Base):
     __tablename__ = "shifts"
 
     id = Column(String(36), primary_key=True)
@@ -26,3 +31,12 @@ class Shift(Base):
             "AND end_reason IN ('manual', 'handover') AND closed_by IS NOT NULL)",
             name="ck_shift_closure"),
     )
+
+
+class ArchivedIdempotencyKey(Base):
+    __tablename__ = "idempotency_keys"
+
+    key = Column(String(64), primary_key=True)
+    scope = Column(String(32), nullable=False)  # check-in | check-out | handover
+    response = Column(String, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())

@@ -1,93 +1,26 @@
 # Acceso con Clerk
 
-LivePulse usa usuarios independientes de Medical 360. Clerk administra identidad,
-registro, verificación de correo, recuperación y sesiones. FastAPI verifica JWT
-RS256 mediante las claves públicas JWKS de la instancia. No requiere Secret Key
-ni un segundo backend propio. Nunca se debe poner una Secret Key en EXPO_PUBLIC_*.
+Social Pulse tiene usuarios independientes de Medical 360. Clerk gestiona registro y sesión;
+FastAPI valida los JWT con las claves públicas de la misma instancia.
+Los roles y permisos se validan en el servidor en cada petición.
 
-## Configuración local
+## Configuración
 
-1. En Clerk, habilitar correo/contraseña y verificación de correo para registro.
-   El formulario web respeta los métodos configurados en esa instancia.
-2. Copiar `apps/mobile/.env.example` a `apps/mobile/.env.local` y poner la
-   Publishable Key. Configurar `EXPO_PUBLIC_API_URL=http://localhost:8000`.
-3. Crear `backend/.env` con:
+- Frontend: `VITE_CLERK_PUBLISHABLE_KEY`, únicamente la Publishable Key.
+- Backend: `CLERK_ISSUER`, `CLERK_AUTHORIZED_PARTIES` como array JSON de orígenes exactos.
+- `CORS_ORIGINS`: necesario si la web y la API están en orígenes distintos durante desarrollo.
+- `ADMIN_USER_IDS=["user_..."]`: administradores iniciales de Social Pulse.
 
-```dotenv
-CLERK_ISSUER=https://your-instance.clerk.accounts.dev
-CLERK_AUTHORIZED_PARTIES=["http://localhost:8081","http://localhost:8080"]
-CORS_ORIGINS=["http://localhost:8081","http://localhost:8080"]
-LIVEPULSE_USER_ACCOUNTS={}
-```
+Usar la misma instancia Clerk para la clave pública y el issuer. En producción, configurar
+los orígenes HTTPS reales. Los secretos de integraciones se guardan solo en el backend;
+nunca en variables `VITE_*`.
 
-Usar exactamente el Frontend API URL de la misma instancia de la clave pública.
-Los orígenes deben coincidir con el puerto y dominio reales de la web. En producción,
-reemplazar localhost por los dominios HTTPS permitidos y usar una instancia de producción.
+En Docker la web usa `/api` por Nginx. En desarrollo consultar `dev-local.md`.
+Cambiar una variable `VITE_*` requiere reconstruir la web. Reiniciar la API tras cambiar
+sus variables de entorno. No se necesita una Secret Key para verificar los JWT.
 
-4. Desde `backend`, aplicar `python -m alembic upgrade head` y ejecutar `.venv\Scripts\python -m uvicorn livepulse.entrypoints.api:app --reload`.
-5. Desde `apps/mobile`: `npm ci`, luego `npm run web -- --port 8081`.
+## Permisos
 
-Los archivos .env locales están ignorados por Git. El build web incorpora la clave
-pública y la URL de API: cambiar estas variables requiere recompilar.
-
-## Elección de cuenta y permisos
-
-Acceso automático: toda usuaria registrada recibe `default_accounts`
-(`medical` y `medical-2`) y `/v1/me` responde `status=approved`. Ella
-elige la cuenta en la pantalla de inicio, sin intervención del admin.
-El selector solo cambia la cuenta elegida en esa pantalla; no inicia un LIVE
-ni registra una jornada. Al salir de la pantalla o recargar debe volver a elegir.
-
-Para restringir o revocar a alguien se usa la excepción por usuario
-(con el ID `user_...` que muestra Clerk):
-
-```dotenv
-LIVEPULSE_USER_ACCOUNTS={"user_ID_REAL":[]}
-```
-
-Una lista vacía deja a esa usuaria en `pending` (solo `/v1/me`, turnos
-403); la pantalla muestra "No hay cuentas disponibles". Reiniciar la API tras cambiarlo. No usar email como ID ni confiar
-en roles/cuentas enviados por el cliente o en metadatos editables por
-usuarios. La administración y la persistencia de usuarios/permisos
-en PostgreSQL quedan pendientes para el módulo de identidad.
-
-El cierre de sesión termina el acceso en Clerk; no equivale a marcar salida de
-jornada. El backend verifica tokens de corta duración; una revocación de sesión
-puede tardar hasta que venza el token ya emitido. Los permisos locales se consultan
-en cada petición. No hay una sesión autenticada de demostración.
-
-## Android y iPhone
-
-El SDK usa SecureStore para la sesión nativa y `useHostedAuth` para el portal.
-Activar Native API en Clerk y registrar los identificadores de `app.json`
-(`com.medical.livepulse`) antes del build de producción. Confirmar esos
-identificadores definitivos antes de publicar en tiendas. El plugin de Clerk
-configura el retorno del portal a la app; cambios requieren recompilar el binario.
-La URL de API de un teléfono debe ser accesible desde el teléfono, no localhost.
-La exportación de JavaScript no sustituye una prueba real de APK/IPA.
-
-## Docker y CI
-
-Crear `.env` en la raíz a partir de `.env.example` y ejecutar desde esa raíz:
-
-```powershell
-docker compose --env-file .env -f infra/compose.yaml up --build -d
-```
-
-Web: http://localhost:8080. En Docker la app usa `/api` por el proxy de Nginx.
-La clave pública se pasa como build argument; el issuer y los permisos como
-variables del contenedor API. No se copia ningún .env a las imágenes.
-
-CI valida las rutas sin credenciales reales: pruebas con JWT firmados con claves
-RSA efímeras y mocks solo en tests de UI. Los artefactos de CI sin clave configurada
-muestran "Acceso no configurado"; para habilitar Clerk hay que construir con la
-clave de la instancia. CI no crea usuarios ni envía correos reales.
-
-## Alcance
-
-Integrado: Clerk, protección de pantallas, Bearer token, `/v1/me`, permisos por cuenta,
-entrada/salida, relevo e historial en PostgreSQL. Ver `shifts.md`.
-Pendiente: completar monitor TikTok, conciliación, métricas y administración de permisos.
-
-Referencias: https://clerk.com/docs/expo/getting-started/quickstart
-https://clerk.com/docs/guides/sessions/manual-jwt-verification
+`GET /api/auth/me` devuelve el perfil, rol y permisos de Social Pulse.
+La matriz vigente está en `social-live-api.md`. El registro no concede administración.
+La identidad de Clerk no asigna cuentas TikTok ni registra asistencia.

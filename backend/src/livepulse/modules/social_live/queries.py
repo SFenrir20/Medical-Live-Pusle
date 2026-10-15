@@ -4,25 +4,19 @@ Dashboards read consolidated live_metrics and the contact registry, never raw co
 and attribution run on bounded, already-filtered row sets in Python so the same code runs on
 PostgreSQL and in portable tests.
 
-Three things are kept apart (a live is NOT owned by one TikToker):
-- the broadcast: account and real time window (lives);
-- the shifts: who worked and during which interval (shifts);
-- the attribution: who a contact or metric belongs to is decided by time, with an explicit
-  "Sin asignar" when nobody had a shift. lives.tiktoker_id is only a fallback.
+A live uses its explicitly assigned tiktoker_id. Without an assignment, metrics
+remain "Sin asignar". Historical attendance records are never consulted.
 
 Phone metrics are per CONTACT and use the date of its FIRST capture (Lima calendar):
 a number that reappears in another live or account is never counted again."""
-from collections import defaultdict
 from datetime import timedelta
 from statistics import median
-from types import SimpleNamespace
 
 from fastapi import HTTPException
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, select
 
 from ...shared.config import settings
-from ..analytics.models import MonitorState, UserRole
-from ..shifts.models import Shift
+from ..analytics.models import MonitorState
 from .models import (
     CapturedPhone,
     Live,
@@ -94,93 +88,31 @@ def metrics_dict(m: LiveMetrics | None) -> dict:
     return base
 
 
-# ---------- attribution by shift ----------
+# ---------- explicit LIVE responsibility ----------
 
 class Attribution:
-    """Who was in charge of an account at a given moment."""
+    """Resolve the responsible TikToker explicitly associated with a LIVE."""
 
-    def __init__(self, shifts, names, tiktokers):
-        self._names, self._tiktokers = names, tiktokers
-        self._by_account: dict[str, list] = defaultdict(list)
-        for s in shifts:
-            self._by_account[s.account_id].append((
-                aware_utc(s.started_at), aware_utc(s.ended_at) if s.ended_at else None,
-                s.user_id, s.display_name or names.get(s.user_id) or s.user_id))
-        for rows in self._by_account.values():
-            rows.sort(key=lambda r: r[0])
+    def __init__(self, tiktokers):
+        self._tiktokers = tiktokers
 
     def name_of(self, ident):
-        if ident is None:
-            return UNASSIGNED
-        return self._names.get(ident) or self._tiktokers.get(ident) or ident
+        return self._tiktokers.get(ident, ident) if ident else UNASSIGNED
 
-    def at(self, account_id, moment, fallback_id=None):
-        moment = aware_utc(moment)
-        for start, end, uid, name in self._by_account.get(account_id, ()):
-            if start <= moment and (end is None or moment < end):
-                return uid, name
-        if fallback_id:
-            return fallback_id, self.name_of(fallback_id)
-        return None, UNASSIGNED
+    def owner(self, tiktoker_id=None):
+        return tiktoker_id, self.name_of(tiktoker_id)
 
     def intervals(self, live: Live):
-        """Consecutive [start, end) pieces of the broadcast with who covered each one."""
         start, stop = aware_utc(live.started_at), live_end(live)
-        pieces, cursor = [], start
-        for s_start, s_end, uid, name in self._by_account.get(live.account_id, ()):
-            end = s_end or stop
-            if end <= cursor or s_start >= stop:
-                continue
-            piece_start = max(s_start, cursor)
-            if piece_start > cursor:
-                pieces.append((cursor, piece_start, None, UNASSIGNED))
-            pieces.append((piece_start, min(end, stop), uid, name))
-            cursor = min(end, stop)
-        if cursor < stop:
-            pieces.append((cursor, stop, None, UNASSIGNED))
-        if live.tiktoker_id:  # an explicit assignment only fills the holes
-            fb = live.tiktoker_id
-            pieces = [(a, b, fb, self.name_of(fb)) if uid is None else (a, b, uid, name)
-                      for a, b, uid, name in pieces]
-        return pieces
+        return [(start, stop, live.tiktoker_id, self.name_of(live.tiktoker_id))] if stop > start else []
 
     def shares(self, live: Live) -> dict:
-        """{id|None: (name, fraction)} summing to 1 over the broadcast."""
-        pieces = self.intervals(live)
-        total = sum((b - a).total_seconds() for a, b, _, _ in pieces) or 1.0
-        out: dict = {}
-        for a, b, uid, name in pieces:
-            _, frac = out.get(uid, (name, 0.0))
-            out[uid] = (name, frac + (b - a).total_seconds() / total)
-        if not out:
-            out[live.tiktoker_id] = (self.name_of(live.tiktoker_id), 1.0)
-        return out
+        return {live.tiktoker_id: (self.name_of(live.tiktoker_id), 1.0)}
 
 
-def window_of(lives):
-    items = list(lives)
-    start = min(aware_utc(i.started_at) for i in items)
-    stop = max(aware_utc(i.ended_at) if i.ended_at else utcnow() for i in items)
-    return start, stop
-
-
-async def load_attribution(session, lives) -> Attribution:
-    """`lives` may be Live rows or anything with account_id/started_at/ended_at."""
+async def load_attribution(session) -> Attribution:
     tiktokers = {t.id: t.name for t in (await session.scalars(select(Tiktoker))).all()}
-    lives = [row for row in lives if row.account_id]
-    if not lives:
-        return Attribution([], {}, tiktokers)
-    accounts = {row.account_id for row in lives}
-    start, stop = window_of(lives)
-    shifts = (await session.scalars(select(Shift).where(
-        Shift.account_id.in_(accounts), Shift.started_at < stop + timedelta(seconds=1),
-        or_(Shift.ended_at.is_(None), Shift.ended_at > start)))).all()
-    ids = {s.user_id for s in shifts}
-    names = {}
-    if ids:
-        names = {r.user_id: r.display_name for r in (await session.scalars(
-            select(UserRole).where(UserRole.user_id.in_(ids)))).all() if r.display_name}
-    return Attribution(shifts, names, tiktokers)
+    return Attribution(tiktokers)
 
 
 def involves(shares, tiktoker_id) -> bool:
@@ -225,7 +157,7 @@ def live_summary(live, metrics, account, shares) -> dict:
 
 async def list_lives(session, limit, offset, tiktoker_id=None, **filters):
     rows = await fetch_lives(session, **filters)
-    attribution = await load_attribution(session, [r[0] for r in rows])
+    attribution = await load_attribution(session)
     kept = []
     for live, metrics, account in rows:
         shares = attribution.shares(live)
@@ -262,7 +194,7 @@ async def live_phone_rows(session, live: Live, status=None):
 async def live_detail(session, live: Live):
     metrics = await session.scalar(select(LiveMetrics).where(LiveMetrics.live_id == live.id))
     account = await session.get(TiktokAccount, live.account_id)
-    attribution = await load_attribution(session, [live])
+    attribution = await load_attribution(session)
     rows = await live_phone_rows(session, live)
     firsts = [reg for app, reg in rows if app.is_new]
     times = [t for t in (contact_time_seconds(reg) for reg in firsts) if t is not None]
@@ -336,23 +268,16 @@ async def contact_rows(session, date_from=None, date_to=None, account_id=None):
     return (await session.execute(query)).all()
 
 
-def as_window(contact: PhoneRegistry):
-    """A zero-length 'live' so shift attribution can load shifts around a capture."""
-    return SimpleNamespace(account_id=contact.first_account_id,
-                           started_at=contact.first_captured_at,
-                           ended_at=contact.first_captured_at)
-
-
 def owner_of(attribution, contact: PhoneRegistry, live: Live | None):
     if not contact.first_account_id:
         return None, UNASSIGNED
     fallback = live.tiktoker_id if live is not None else None
-    return attribution.at(contact.first_account_id, contact.first_captured_at, fallback)
+    return attribution.owner(fallback)
 
 
 async def scoped_contacts(session, date_from, date_to, tiktoker_id, account_id):
     rows = await contact_rows(session, date_from, date_to, account_id)
-    attribution = await load_attribution(session, [as_window(c) for c, _ in rows])
+    attribution = await load_attribution(session)
     if tiktoker_id:
         rows = [(c, live) for c, live in rows if owner_of(attribution, c, live)[0] == tiktoker_id]
     return rows, attribution
@@ -376,8 +301,7 @@ async def overview(session, tiktoker_id=None, **filters):
     date_from, date_to = filters.get('date_from'), filters.get('date_to')
     account_id = filters.get('account_id')
     rows = await fetch_lives(session, **filters)
-    live_list = [r[0] for r in rows]
-    attribution = await load_attribution(session, live_list)
+    attribution = await load_attribution(session)
     total = {f: 0.0 for f in METRIC_FIELDS}
     seconds, count, live_now, peak = 0.0, 0, 0, 0
     for live, metrics, _ in rows:
@@ -411,7 +335,7 @@ async def overview(session, tiktoker_id=None, **filters):
             'phone_mentions': int(total['phone_mentions']),
             'live_hours': round(seconds / 3600, 2), 'leads_per_hour': rate(phones, seconds),
             'note': 'phones cuenta contactos únicos por la fecha de su PRIMERA captura. '
-                    'Los contadores del live se reparten por tiempo de turno cuando se filtra '
+                    'Los contadores del live corresponden a su responsable asignada cuando se filtra '
                     'por tiktoker_id. unique_viewers no está disponible.'}
 
 
@@ -421,7 +345,7 @@ SORTS = {'phones': 'phones', 'leads_per_hour': 'leads_per_hour', 'views': 'views
 
 async def ranking(session, sort_by, **filters):
     rows = await fetch_lives(session, **filters)
-    attribution = await load_attribution(session, [r[0] for r in rows])
+    attribution = await load_attribution(session)
     board: dict = {}
 
     def entry(key, name):
@@ -464,7 +388,7 @@ async def ranking(session, sort_by, **filters):
 
 async def accounts_performance(session, tiktoker_id=None, **filters):
     rows = await fetch_lives(session, **filters)
-    attribution = await load_attribution(session, [r[0] for r in rows])
+    attribution = await load_attribution(session)
     board: dict = {}
     accounts = {a.id: a for a in (await session.scalars(select(TiktokAccount))).all()}
 
@@ -586,11 +510,8 @@ async def monitor(session):
         metrics = await session.scalar(select(LiveMetrics).where(
             LiveMetrics.live_id == live.id)) if live else None
         on_air = bool(live and live.status == 'live')
-        shift = await session.scalar(select(Shift).where(
-            Shift.account_id == account_id, Shift.ended_at.is_(None)))
-        who = None
-        if shift:
-            who = shift.display_name or shift.user_id
+        responsible = await session.get(Tiktoker, live.tiktoker_id) if live and live.tiktoker_id else None
+        who = responsible.name if responsible else None
         pending_contacts = 0
         if live:
             pending_contacts = await session.scalar(
@@ -602,7 +523,7 @@ async def monitor(session):
             'status': state.status if state else 'not_started',
             'heartbeat': iso(state.observed_at) if state else None,
             'on_air': on_air, 'live_id': live.id if live else None,
-            'tiktoker': who,   # who has the shift now; None = nobody checked in
+            'tiktoker': who,   # explicitly assigned LIVE host, if known
             'started_at': stamp(live.started_at if live else None),
             'ended_at': stamp(live.ended_at if live else None),
             'metrics': metrics_dict(metrics) if live else None,
@@ -623,7 +544,7 @@ async def inbox(session, since=None, limit=100, only_with_phone=False, account_i
     if account_id:
         query = query.where(Live.account_id == account_id)
     rows = (await session.execute(query)).all()
-    attribution = await load_attribution(session, [live for _, live in rows])
+    attribution = await load_attribution(session)
     phones = {c.phone_detected for c, _ in rows if c.phone_detected}
     contacts = {}
     if phones:
@@ -633,7 +554,7 @@ async def inbox(session, since=None, limit=100, only_with_phone=False, account_i
     items = []
     for comment, live in rows:
         contact = contacts.get(comment.phone_detected)
-        who_id, who = attribution.at(live.account_id, comment.created_at, live.tiktoker_id)
+        who_id, who = attribution.owner(live.tiktoker_id)
         kind = ('Cliente potencial' if comment.phone_detected
                 else 'Interesado' if comment.interested else 'Comentario')
         items.append({

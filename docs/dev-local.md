@@ -1,40 +1,38 @@
-# Desarrollo local
+# Desarrollo local de Social Pulse
 
-Notas para entorno de desarrollo. No usar en producciÃ³n.
+## Backend
 
-## API
+Desde `backend`, con Python 3.11 o superior y PostgreSQL disponible:
 
-Desde la raÃ­z del repo, en `backend/`: crear entorno virtual, instalar
-dependencias de desarrollo y arrancar Uvicorn. La documentaciÃ³n
-interactiva queda en `/docs` y `/health` solo comprueba el proceso HTTP.
+```sh
+python -m venv .venv
+# Activar .venv según el sistema operativo.
+python -m pip install -e ".[dev]"
+python -m alembic upgrade head
+python -m uvicorn livepulse.entrypoints.api:app --reload
+```
 
-## App
+Configurar `backend/.env` con `DATABASE_URL`, `CLERK_ISSUER`,
+`CLERK_AUTHORIZED_PARTIES=["http://localhost:8443"]` y
+`CORS_ORIGINS=["http://localhost:8443"]`. Los arrays son JSON válido.
 
-Desde la raÃ­z del repo, en `apps/mobile/`: instalar dependencias con
-`npm ci`. Arranque web con el script correspondiente. Para dispositivo
-fÃ­sico, configurar la URL pÃºblica de la API y reiniciar Expo.
+## Frontend
 
-## Verificar
+Copiar `apps/social-pulse/.env.example` a `.env.local` en esa misma carpeta y
+configurar la clave pública Clerk y `VITE_API_URL=http://localhost:8000/api`.
+Desde `apps/social-pulse`:
 
-- Backend: lint y pruebas con el entorno virtual.
-- App: lint, tipos, pruebas, exportaciÃ³n web y chequeo de dependencias Expo.
+```sh
+pnpm install --frozen-lockfile
+pnpm dev
+```
 
-## Docker
+Vite usa el puerto 8443 por defecto (o `PORT`). Ajustar los orígenes del backend
+si se cambia. El frontend es web React/Vite; no necesita herramientas móviles.
 
-Compose levanta PostgreSQL, API y web. El script de smoke verifica HTTP,
-rutas y rechazo de entradas sin autenticaciÃ³n. Las credenciales de
-Compose son solo de desarrollo local. Monitor y worker estÃ¡n fuera del
-arranque normal (perfil pendiente) porque aÃºn son esqueletos. Sin
-migraciones de negocio implementadas todavÃ­a.
+## Validación
 
-## CI
-
-GitHub Actions ejecuta `backend`, `mobile` y `docker` segÃºn el evento.
-Guarda artefactos de la web y de imÃ¡genes Docker en `main`. Esos
-artefactos no son APK/IPA y no despliegan a producciÃ³n ni a tiendas.
-
-## Pendientes antes de publicar
-
-- Configurar Clerk siguiendo `docs/clerk.md` y probar el acceso real.
-- Implementar autenticaciÃ³n, autorizaciÃ³n y turnos persistentes por cuenta.
-- Probar concurrencia, Android/iOS y captura real de TikTok.
+En `backend`: `python -m ruff check src tests` y `python -m pytest -q`.
+Las pruebas PostgreSQL requieren `DATABASE_URL` hacia una base de pruebas.
+En `apps/social-pulse`: `pnpm build` valida TypeScript y compila la web.
+Con el stack Docker iniciado: `python infra/smoke.py` desde la raíz.

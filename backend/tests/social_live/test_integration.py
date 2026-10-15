@@ -1,4 +1,4 @@
-"""Review findings: global phone dedupe, attribution by shift, retention, agent work queue,
+"""Review findings: global phone dedupe, explicit LIVE responsibility, retention, agent work queue,
 and the bridge from the TikTok monitor to the Social Live model."""
 from datetime import datetime, timedelta, timezone
 
@@ -8,7 +8,6 @@ from sqlalchemy import func, select, update
 
 from livepulse.modules.analytics.models import UserRole
 from livepulse.modules.broadcasts.models import Broadcast, RawEvent
-from livepulse.modules.shifts.models import Shift
 from livepulse.modules.social_live import models as m
 from livepulse.modules.social_live.publisher import publish_batch
 from livepulse.modules.social_live.retention import purge_expired
@@ -82,44 +81,31 @@ async def test_a_number_is_new_once_across_lives(env):
     assert (await client.get(f'{MKT}/hourly-performance', headers=READ)).json()['total'] == 2
 
 
-async def test_attribution_follows_shifts_with_unassigned_gaps(env):
+async def test_explicit_host_assignment_and_unassigned_lives(env):
     client, factory = env
     await setup_account(client)
     start = datetime.now(timezone.utc).replace(microsecond=0) - timedelta(hours=4)
-    await new_live(client, 'LIVE-1', started=start)
     async with factory() as s, s.begin():
-        s.add(UserRole(user_id='ana', role='agente_ventas', display_name='Ana Ruiz'))
-        s.add(Shift(id='s1', account_id='medical', user_id='ana', display_name='Ana Ruiz',
-                    started_at=start, ended_at=start + timedelta(hours=1),
-                    end_reason='handover', closed_by='bea'))
-        s.add(Shift(id='s2', account_id='medical', user_id='bea', display_name='Bea Lira',
-                    started_at=start + timedelta(hours=1), ended_at=start + timedelta(hours=2),
-                    end_reason='manual', closed_by='bea'))
-    # one number during each shift and one in the hour nobody was checked in
+        s.add(m.Tiktoker(id='ana', name='Ana Ruiz'))
+    await new_live(client, 'LIVE-1', started=start, tiktoker='ana')
+    await new_live(client, 'LIVE-2', started=start)
     await add_phone(client, 'LIVE-1', '987654321', start + timedelta(minutes=30))
     await add_phone(client, 'LIVE-1', '976543210', start + timedelta(minutes=90))
-    await add_phone(client, 'LIVE-1', '965432109', start + timedelta(minutes=150))
-    await add_phone(client, 'LIVE-1', '954321098', start + timedelta(hours=1))  # exact handover
+    await add_phone(client, 'LIVE-2', '965432109', start + timedelta(minutes=150))
 
     board = {i['tiktoker']: i for i in
              (await client.get(f'{MKT}/ranking', headers=READ)).json()['items']}
-    assert board['Ana Ruiz']['phones'] == 1
-    assert board['Bea Lira']['phones'] == 2  # the handover instant belongs to the new shift
+    assert board['Ana Ruiz']['phones'] == 2 and board['Ana Ruiz']['rank'] == 1
     assert board['Sin asignar']['phones'] == 1 and board['Sin asignar']['rank'] is None
-    assert board['Ana Ruiz']['rank'] in (1, 2)
-
     detail = (await client.get(f'{MKT}/lives/LIVE-1', headers=READ)).json()
-    names = [i['tiktoker'] for i in detail['intervals']]
-    assert names == ['Ana Ruiz', 'Bea Lira', 'Sin asignar']
-    shares = {t['name']: t['share'] for t in detail['tiktokers']}
-    assert shares['Ana Ruiz'] == pytest.approx(0.25, abs=0.01)
-    assert shares['Sin asignar'] == pytest.approx(0.5, abs=0.01)
-
+    assert [i['tiktoker'] for i in detail['intervals']] == ['Ana Ruiz']
+    assert detail['tiktokers'][0]['share'] == 1.0
     only_ana = (await client.get(f'{MKT}/contact-performance', headers=READ,
                                  params={'tiktoker_id': 'ana'})).json()
-    assert only_ana['phones'] == 1
-    assert (await client.get(f'{MKT}/lives', headers=READ,
-                             params={'tiktoker_id': 'bea'})).json()['items'][0]['id'] == 'LIVE-1'
+    assert only_ana['phones'] == 2
+    only_lives = (await client.get(f'{MKT}/lives', headers=READ,
+                                   params={'tiktoker_id': 'ana'})).json()['items']
+    assert [row['id'] for row in only_lives] == ['LIVE-1']
     assert (await client.get(f'{MKT}/lives', headers=READ,
                              params={'tiktoker_id': 'nadie'})).json()['items'] == []
 

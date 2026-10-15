@@ -88,7 +88,7 @@ async def _first_comments(session, contacts):
 async def _present(session, rows, me):
     """rows: [(PhoneRegistry, Live|None)] -> UI items."""
     contacts = [c for c, _ in rows]
-    attribution = await queries.load_attribution(session, [queries.as_window(c) for c in contacts])
+    attribution = await queries.load_attribution(session)
     comments = await _first_comments(session, contacts)
     names = await names_of(session, {c.advisor_id for c in contacts})
     accounts = {a.id: a.username for a in (await session.scalars(select(TiktokAccount))).all()}
@@ -138,11 +138,11 @@ async def inbox(scope: Literal['all', 'mine', 'unassigned'] = 'all',
         plain = (await session.execute(select(LiveComment, Live)
             .join(Live, Live.id == LiveComment.live_id)
             .where(LiveComment.id.in_(comment_ids)))).all()
-        attribution = await queries.load_attribution(session, [live for _, live in plain])
+        attribution = await queries.load_attribution(session)
         accounts = {a.id: a.username
                     for a in (await session.scalars(select(TiktokAccount))).all()}
         for comment, live in plain:
-            host_id, host = attribution.at(live.account_id, comment.created_at, live.tiktoker_id)
+            host_id, host = attribution.owner(live.tiktoker_id)
             items.append({
                 'kind': 'comment', 'id': -comment.id, 'live_id': comment.live_id,
                 'account': '@' + accounts.get(live.account_id, live.account_id),
