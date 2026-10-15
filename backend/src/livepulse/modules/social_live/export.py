@@ -24,8 +24,8 @@ def text_cell(sheet, value):
 
 async def build_xlsx(session, live: Live) -> bytes:
     account = await session.get(TiktokAccount, live.account_id)
-    # Who was in charge is decided by the shift at the time of each comment.
-    attribution = await queries.load_attribution(session, [live])
+    # The host is the explicitly assigned LIVE responsible, or unassigned.
+    attribution = await queries.load_attribution(session)
     workbook = Workbook(write_only=True)
     sheet = workbook.create_sheet('Comentarios')
     sheet.append([text_cell(sheet, h) for h in HEADERS])
@@ -38,7 +38,7 @@ async def build_xlsx(session, live: Live) -> bytes:
             break
         for r in rows:
             local = aware_utc(r.created_at).astimezone(LIMA)
-            _, tiktoker = attribution.at(live.account_id, r.created_at, live.tiktoker_id)
+            _, tiktoker = attribution.owner(live.tiktoker_id)
             sheet.append([text_cell(sheet, v) for v in (
                 local.strftime('%Y-%m-%d'), local.strftime('%H:%M:%S'), r.username, r.comment,
                 r.phone_detected, live.id, tiktoker,

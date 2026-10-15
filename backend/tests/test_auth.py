@@ -18,7 +18,6 @@ def signing(monkeypatch):
     private = rsa.generate_private_key(public_exponent=65537, key_size=2048)
     monkeypatch.setattr(auth.settings, "clerk_issuer", "https://clerk.example")
     monkeypatch.setattr(auth.settings, "clerk_authorized_parties", ["http://localhost:8081"])
-    monkeypatch.setattr(auth.settings, "livepulse_user_accounts", {"user_approved": ["medical"]})
     provider = Mock()
     provider.get_signing_key_from_jwt.return_value = SimpleNamespace(key=private.public_key())
     monkeypatch.setattr(auth, "jwks_client", lambda _: provider)
@@ -39,23 +38,20 @@ def request(token, path="/v1/me"):
     return client.get(path, headers={"Authorization": f"Bearer {token}"})
 
 
-def test_new_user_gets_default_accounts_without_approval(signing):
-    token = signing()
-    assert request(token).json() == {"id": "user_new", "accounts": ["medical", "medical-2"],
-                                     "status": "approved"}
+def test_verified_identity_does_not_grant_tiktok_account_access(signing):
+    assert request(signing()).json() == {"id": "user_new"}
 
 
-def test_explicit_empty_grant_blocks_user(signing, monkeypatch):
-    monkeypatch.setattr(auth.settings, "livepulse_user_accounts", {"user_new": []})
-    token = signing()
-    assert request(token).json() == {"id": "user_new", "accounts": [], "status": "pending"}
-    assert request(token, "/v1/shifts/active?account_id=medical").status_code == 403
-
-
-def test_operator_grants_only_authorized_accounts(signing):
-    token = signing(sub="user_approved")
-    assert request(token).json()["accounts"] == ["medical"]
-    assert request(token, "/v1/shifts/active?account_id=medical-2").status_code == 403
+@pytest.mark.parametrize("path,method", [
+    ("/v1/shifts/active?account_id=medical", "GET"),
+    ("/v1/shifts/history", "GET"),
+    ("/v1/shifts/check-in", "POST"),
+    ("/v1/shifts/check-out", "POST"),
+    ("/v1/analytics/lives/1/attribution", "GET"),
+])
+def test_retired_attendance_routes_are_unavailable(signing, path, method):
+    response = client.request(method, path, headers={"Authorization": f"Bearer {signing()}"})
+    assert response.status_code == 404
 
 
 @pytest.mark.parametrize("claims", [
@@ -84,7 +80,7 @@ def test_missing_required_claim(signing, field):
     assert request(signing(omit=[field])).status_code == 401
 
 
-def test_native_session_can_omit_browser_origin(signing):
+def test_session_without_optional_origin(signing):
     assert request(signing(omit=["azp"])).status_code == 200
 
 

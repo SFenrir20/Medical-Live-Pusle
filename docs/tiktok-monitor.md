@@ -9,7 +9,7 @@ El perfil Compose `live` inicia un monitor por cuenta y el worker. El arranque d
 - Cada evento queda vinculado al LIVE. Se prioriza `common.msg_id` para deduplicar y `common.create_time` para su hora, cuando existen.
 - El worker bloquea lotes con `SKIP LOCKED`, crea hechos de métricas/contactos y marca el evento procesado dentro de la misma transacción. Reintentar no suma otra vez.
 - Los regalos en racha se suman al finalizar la racha. Diamantes no equivalen a dinero ni a ingresos de la clínica.
-- La relación con turnos se consulta por cuenta y hora del evento; los intervalos incluyen el inicio y excluyen el fin. Una entrada tardía no se atribuye retroactivamente.
+- La responsable proviene de la asignación explícita del LIVE; sin ella figura «Sin asignar».
 - Marketing muestra señal de vida de monitores y worker, eventos pendientes y falta de datos.
 
 ```sh
@@ -17,7 +17,7 @@ docker compose -f infra/compose.yaml --profile live up -d --build
 docker compose -f infra/compose.yaml logs -f monitor worker
 ```
 
-Validar con LIVE reales: ambas cuentas simultáneas, corte de red, siguiente transmisión, reinicio de proceso, mensajes repetidos y un relevo de TikToker. La API externa puede cambiar y no se garantiza recuperar eventos ocurridos durante una interrupción.
+Validar con LIVE reales: ambas cuentas simultáneas, corte de red, siguiente transmisión, reinicio de proceso, mensajes repetidos y asignación explícita de responsable. La API externa puede cambiar y no se garantiza recuperar eventos ocurridos durante una interrupción.
 
 Eventos antiguos sin sala identificable permanecen sin vincular. No se incluyen en métricas de un LIVE inventado.
 Ver `phases.md` y `operations.md` para criterios de aceptación, configuración y pendientes externos.

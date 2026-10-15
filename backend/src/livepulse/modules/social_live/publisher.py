@@ -4,7 +4,7 @@
 Capturing a LIVE must show up in the new reports, so the worker runs `publish_batch` on every
 tick. It is idempotent: each raw event is claimed once through live_event_keys, so reruns,
 restarts and parallel workers never double count. A live is the broadcast (account and real
-time window); who worked is derived later from shifts."""
+time window); the host remains unassigned unless explicitly supplied."""
 from datetime import timedelta
 
 from fastapi import HTTPException

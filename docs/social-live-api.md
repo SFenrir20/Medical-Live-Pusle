@@ -16,7 +16,6 @@ Ningún frontend habla con otro. Todo pasa por la API.
 |---|---|---|
 | Registro de eventos (verdad cruda) | `raw_events` (+ `broadcasts`, estado del monitor) | monitor |
 | Modelo de lectura (lo que consumen las pantallas) | `lives`, `live_metrics`, `live_comments` (temporal), `phone_registry` (contacto único), `captured_phones` (apariciones), `contact_audit` | worker y API |
-| Turnos | `shifts` (independiente del LIVE) | app de marcación |
 
 El worker pliega cada evento de `raw_events` en el modelo de lectura **una sola vez**: la marca
 `raw_events.published_at` es permanente (sobrevive a la limpieza). El historial anterior se
@@ -74,13 +73,14 @@ Atención (`/api`): `GET /inbox`, `PATCH /leads/{id}` (`action: claim|release|as
 - Reportes por día, semana, mes, hora, cuenta y TikToker usan la **fecha de primera captura**
   en calendario de Lima (un contacto a las 23:50 de Lima cuenta en ese día).
 
-## Transmisión, turnos y atribución
+## Transmisión y responsable
 
-Un live **no pertenece a una persona**: transmisión (`lives`), turnos (`shifts`) y atribución
-(por intervalo `[inicio, fin)`) son independientes. Sin evidencia de turno: **«Sin asignar»**
-(`lives.tiktoker_id` es opcional y solo declara un tramo sin turno). `GET /lives/{id}` incluye
-`intervals` y `tiktokers`. Los contadores a nivel de live se reparten por tiempo de turno solo
-cuando se filtra por persona; los teléfonos se atribuyen por la hora de su primera captura.
+`lives.tiktoker_id` identifica a la responsable asignada explícitamente al LIVE.
+Si falta, los reportes muestran **«Sin asignar»**. El monitor automático no inventa
+una responsable. `GET /lives/{id}` conserva `intervals` y `tiktokers` por compatibilidad,
+con una única responsable para el LIVE completo. Los teléfonos se cuentan en el momento
+de su primera captura y se atribuyen a la responsable de ese LIVE.
+La asistencia histórica no interviene en los cálculos.
 
 ## Ingestión — `/api/social-live` (token `ingest`)
 
@@ -138,7 +138,7 @@ lives, métricas, contactos, auditoría ni rankings.
 | `/api/v1/...` | `/v1/...` (app anterior) |
 | `/api/auth`, `/api/inbox`, `/api/leads`, `/api/team`, `/api/marketing/...`, `/api/social-live/...` | igual |
 
-Social Pulse (`apps/social-pulse`, puerto `SOCIAL_PORT`) usa el mismo origen: no necesita CORS.
+Social Pulse (`apps/social-pulse`, puerto `WEB_PORT`) usa el mismo origen: no necesita CORS.
 En otro origen (Vite en desarrollo) añadirlo a `CORS_ORIGINS` y `CLERK_AUTHORIZED_PARTIES`.
 
 ## Medical 360
@@ -178,7 +178,7 @@ las transmisiones, marca como publicados los eventos ya plegados y mueve el anti
 1. Respaldar la base (`python infra/scripts/backup.py`).
 2. Variables: `MEDICAL360_TOKEN`, `MEDICAL360_EXPORT_TOKEN`, `SOCIAL_LIVE_TOKEN` (si se usa
    captura externa), `ADMIN_USER_IDS`, `CLERK_ISSUER`, `CLERK_AUTHORIZED_PARTIES` (incluir el
-   origen de Social Pulse), `VITE_CLERK_PUBLISHABLE_KEY`, `SOCIAL_PORT`, `CORS_ORIGINS` si aplica.
+   origen de Social Pulse), `VITE_CLERK_PUBLISHABLE_KEY`, `WEB_PORT`, `CORS_ORIGINS` si aplica.
 3. Reconstruir y desplegar `api`, `worker`, `monitor` y `social` (no basta reiniciar). La API
    aplica `alembic upgrade head` al iniciar.
 4. `python -m alembic current` debe mostrar `0007 (head)`.

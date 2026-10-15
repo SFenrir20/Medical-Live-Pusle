@@ -2,7 +2,7 @@
 
 Deprecated: kept so existing consumers keep working, but it no longer has its own data. Both
 views are adapters over the unified read model (social_live.queries), so they show exactly what
-`/api/marketing/tiktok/*` shows: unique contacts by first capture, attribution by shift and the
+`/api/marketing/tiktok/*` shows: unique contacts by first capture, explicit LIVE responsibility and the
 attention state set by the sales team. New consumers should use the /api routes."""
 from ..social_live import queries
 

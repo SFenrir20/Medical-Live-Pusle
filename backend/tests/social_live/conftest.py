@@ -7,14 +7,13 @@ from sqlalchemy.pool import StaticPool
 from livepulse.entrypoints.api import app
 from livepulse.modules.analytics.models import MonitorState, UserRole
 from livepulse.modules.broadcasts.models import Broadcast, RawEvent
-from livepulse.modules.shifts.models import Shift
 from livepulse.modules.social_live import models as m
 from livepulse.shared.config import settings
 from livepulse.shared.db import get_session
 
 TABLES = [m.TiktokAccount.__table__, m.Tiktoker.__table__, m.Live.__table__,
           m.LiveComment.__table__, m.LiveEventKey.__table__, m.LiveInterestedUser.__table__, m.LiveMetrics.__table__,
-          m.CapturedPhone.__table__, m.PhoneRegistry.__table__, Shift.__table__,
+          m.CapturedPhone.__table__, m.PhoneRegistry.__table__,
           UserRole.__table__, Broadcast.__table__, RawEvent.__table__,
           m.ContactAudit.__table__, MonitorState.__table__]
 
@@ -29,8 +28,6 @@ async def env(monkeypatch):
                                  connect_args={'check_same_thread': False})
     async with engine.begin() as connection:
         await connection.run_sync(lambda sync: m.Live.metadata.create_all(sync, tables=TABLES))
-        # SQLite ignores the PostgreSQL partial predicate; relevos need several shifts.
-        await connection.exec_driver_sql('DROP INDEX IF EXISTS uq_active_shift_per_account')
     factory = async_sessionmaker(engine, expire_on_commit=False)
 
     async def session():

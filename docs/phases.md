@@ -1,15 +1,15 @@
-# Fases de implementación de LivePulse
+# Fases de implementación de Social Pulse
 
 Estado de trabajo; `implementado` no sustituye una prueba con TikTok/Leadsales reales.
 
 | Fase | Entrega | Validación para cierre |
 |---|---|---|
 | 1. Captura | LIVE por cuenta/room, reconexión, bloqueo de monitor duplicado, eventos deduplicados, fin tras consultas offline y período de gracia | Pruebas PostgreSQL + dos LIVE reales, caída de red y reinicio |
-| 2. Conciliación | Eventos y tramos asignados por cuenta e intervalo de turno; períodos sin responsable explícitos | Relevo, límites exactos y entradas tardías |
+| 2. Responsables | Responsable explícita del LIVE o «Sin asignar» | Filtrado y conteo por responsable sin asistencia |
 | 3. Métricas/contactos | Comentarios, likes, compartidos, regalos, seguidores observados, muestras de audiencia, interés por reglas, teléfonos, OCR revisado | Comparación con muestras reales; sin equiparar audiencia observada a espectadores únicos |
 | 4. Integraciones/permisos | Roles asignados tras registro, CSV Leadsales y puente de estadísticas para Medical 360 | Configurar administrador inicial y secreto del puente; prueba de importación en Leadsales |
 | 5. Operación | Estado del monitor y cola, migraciones, respaldo/restauración documentados, pruebas Docker | HTTPS, Clerk producción, respaldos programados y restauración en entorno aislado |
-| 6. Móvil | Perfiles Expo para APK, Android e iOS | Credenciales de firma/cuentas de tiendas y pruebas físicas |
+| 6. Web | Social Pulse React/Vite como único frontend | Build, proxy API, permisos y prueba en navegador |
 
 ## Límites explícitos
 
@@ -24,10 +24,8 @@ Estado de trabajo; `implementado` no sustituye una prueba con TikTok/Leadsales r
 
 ## Registro y roles
 
-Los usuarios de Clerk entran a LivePulse para aparecer en la lista administrativa. Por defecto son `tiktoker`.
-Configurar `ADMIN_USER_IDS=["user_ID_DEL_ADMIN"]` en el servidor tras registrar al administrador inicial.
-Ese administrador asigna `marketing`, `care` (Atención al Cliente), `admin` o `tiktoker` desde la app.
-Marketing ve métricas agregadas; Atención al Cliente ve los contactos. Solo un administrador gestiona roles.
+Los usuarios ingresan con Clerk. Configurar `ADMIN_USER_IDS` para los administradores
+iniciales. La matriz vigente de roles y permisos está en `social-live-api.md`.
 
 ## Leadsales
 

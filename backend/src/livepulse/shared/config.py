@@ -1,6 +1,3 @@
-from typing import Literal
-
-from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -8,11 +5,6 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://livepulse:livepulse@localhost:5432/livepulse"
     clerk_issuer: str = ""
     clerk_authorized_parties: list[str] = []
-    # Excepciones por usuario (override). Lista vacia = acceso revocado.
-    # Quien no aparece aqui recibe `default_accounts` automaticamente.
-    livepulse_user_accounts: dict[str, list[Literal["medical", "medical-2"]]] = {}
-    # Acceso automatico: toda registrada elige cuenta sin aprobacion del admin.
-    default_accounts: list[Literal["medical", "medical-2"]] = ["medical", "medical-2"]
     admin_user_ids: list[str] = []
     # Service tokens (Authorization: Bearer). Empty = that credential is disabled.
     social_live_token: str = ""          # Medical Social Live: write events
@@ -28,11 +20,6 @@ class Settings(BaseSettings):
     monitor_reconnect_max_s: float = 60.0
     # Gracia antes de confirmar fin de LIVE tras LiveEndEvent (s).
     monitor_end_grace_s: float = 120.0
-
-    @field_validator("livepulse_user_accounts", mode="before")
-    @classmethod
-    def empty_grants(cls, value):
-        return {} if value is None else value
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

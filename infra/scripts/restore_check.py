@@ -16,5 +16,5 @@ with args.backup.open('rb') as source:
     subprocess.run(base + ['pg_restore', '-U', 'livepulse', '-d', args.database,
                            '--no-owner', '--exit-on-error', '--single-transaction'], stdin=source, check=True)
 subprocess.run(base + ['psql', '-U', 'livepulse', '-d', args.database, '-v', 'ON_ERROR_STOP=1',
-                       '-c', 'SELECT version_num FROM alembic_version; SELECT count(*) FROM shifts;'], check=True)
+                       '-c', 'SELECT version_num FROM alembic_version; SELECT count(*) FROM lives; SELECT count(*) FROM phone_registry;'], check=True)
 print('Verified isolated restore:', args.database)

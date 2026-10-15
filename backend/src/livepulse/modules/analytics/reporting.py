@@ -1,17 +1,8 @@
-"""Metrics over persisted facts; half-open shifts prevent double attribution at handover."""
-from datetime import datetime, timezone
-
-from fastapi import HTTPException
-from sqlalchemy import and_, case, distinct, func, select
+"""Metrics over persisted capture facts for the Medical 360 bridge."""
+from sqlalchemy import case, distinct, func, select
 
 from ..broadcasts.models import Broadcast, RawEvent
-from ..shifts.models import Shift
 from .models import EventFact as F
-
-
-def shift_join():
-    return and_(Shift.account_id == F.account_id, Shift.started_at <= F.occurred_at,
-                (Shift.ended_at.is_(None) | (F.occurred_at < Shift.ended_at)))
 
 
 def aggregates():
@@ -50,29 +41,3 @@ async def lives(session, account=None, limit=20, offset=0):
                       'pending_events': raw - values['events'], 'metrics': values,
                       'direct_messages': None, 'total_unique_viewers': None})
     return {'items': items, 'next_offset': offset + limit if len(rows) > limit else None}
-
-
-async def attribution(session, broadcast_id):
-    broadcast = await session.get(Broadcast, broadcast_id)
-    if broadcast is None:
-        raise HTTPException(404, 'LIVE no encontrado')
-    stop = broadcast.ended_at or datetime.now(timezone.utc)
-    shifts = (await session.scalars(select(Shift).where(
-        Shift.account_id == broadcast.account_id, Shift.started_at < stop,
-        (Shift.ended_at.is_(None) | (Shift.ended_at > broadcast.started_at)))
-        .order_by(Shift.started_at))).all()
-    result = []
-    cursor = broadcast.started_at
-    for shift in shifts:
-        start = max(shift.started_at, broadcast.started_at)
-        end = min(shift.ended_at or stop, stop)
-        if start > cursor:
-            result.append({'user_id': None, 'start': cursor, 'end': start})
-        result.append({'shift_id': shift.id, 'user_id': shift.user_id, 'start': start, 'end': end})
-        cursor = max(cursor, end)
-    if cursor < stop:
-        result.append({'user_id': None, 'start': cursor, 'end': stop})
-    grouped = (await session.execute(select(Shift.user_id, *aggregates()).select_from(F)
-        .outerjoin(Shift, shift_join()).where(F.broadcast_id == broadcast_id)
-        .group_by(Shift.user_id))).mappings().all()
-    return {'broadcast_id': broadcast_id, 'intervals': result, 'by_user': [dict(r) for r in grouped]}

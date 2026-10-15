@@ -19,7 +19,6 @@ from livepulse.modules.analytics.models import (
     UserRole,
 )
 from livepulse.modules.broadcasts.models import Broadcast, RawEvent
-from livepulse.modules.shifts.models import Shift
 from livepulse.modules.social_live import backfill, contacts
 from livepulse.modules.social_live import models as m
 from livepulse.shared import auth as clerk
@@ -236,8 +235,6 @@ async def test_captured_event_is_visible_to_medical360_and_the_old_bridge(env):
     async with factory() as s, s.begin():
         s.add(Broadcast(id=3, account_id='medical', tiktok_username='medical.cirugias',
                         room_id='r3', started_at=now - timedelta(hours=1), end_confirmed=False))
-        s.add(Shift(id='s', account_id='medical', user_id='ana', display_name='Ana Ruiz',
-                    started_at=now - timedelta(hours=2)))
         s.add(RawEvent(event_id='medical:r3:comment:1', account_id='medical', broadcast_id=3,
                        type='comment', occurred_at=now - timedelta(minutes=3),
                        payload={'user': '9', 'username': 'maria'},
@@ -249,11 +246,11 @@ async def test_captured_event_is_visible_to_medical360_and_the_old_bridge(env):
 
     monitor = (await client.get(f'{MKT}/monitor', headers=READ)).json()
     row = next(a for a in monitor['accounts'] if a['account_id'] == 'medical')
-    assert row['on_air'] and row['tiktoker'] == 'Ana Ruiz'
+    assert row['on_air'] and row['tiktoker'] is None
     assert row['metrics']['peak_viewers'] == 30 and row['metrics']['unique_viewers'] is None
     assert row['metrics']['direct_messages_capture'] is False
     inbox = (await client.get(f'{MKT}/inbox', headers=READ)).json()['items']
-    assert inbox[0]['phones'] == ['+51985857968'] and inbox[0]['tiktoker'] == 'Ana Ruiz'
+    assert inbox[0]['phones'] == ['+51985857968'] and inbox[0]['tiktoker'] == 'Sin asignar'
     assert inbox[0]['state'] == 'Por contactar' and inbox[0]['is_first_capture'] is True
     numbers = (await client.get(f'{MKT}/numbers', headers=READ)).json()
     assert numbers['received'] == 1 and numbers['phones'][0]['phone'] == '+51985857968'
@@ -511,14 +508,14 @@ def through_proxy(locations, public_path):
     return target + public_path[len(prefix):]
 
 
-@pytest.mark.parametrize('conf', ['apps/mobile/nginx.conf', 'apps/social-pulse/nginx.conf'])
+@pytest.mark.parametrize('conf', ['apps/social-pulse/nginx.conf'])
 async def test_public_api_paths_reach_existing_backend_routes(env, conf):
     client, _ = env
     locations = nginx_locations(Path(__file__).resolve().parents[3] / conf)
     assert locations, 'no proxy locations parsed'
     expected_public = {
         '/api/health': 200,
-        '/api/v1/shifts/active': 401,           # legacy clients keep working
+        '/api/v1/shifts/active': 404,           # attendance has been retired
         '/api/auth/me': 401,                    # new routes keep their /api prefix
         '/api/inbox': 401,
         '/api/leads/summary': 401,

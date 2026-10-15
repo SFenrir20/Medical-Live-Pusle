@@ -8,7 +8,7 @@ WEB_PORT=8090
 CLERK_AUTHORIZED_PARTIES=["http://192.168.1.50:8090"]
 ```
 
-Conservar la clave pública y el issuer de la instancia de pruebas de Clerk.
+Conservar la clave pública `VITE_CLERK_PUBLISHABLE_KEY` y el issuer de la instancia de pruebas de Clerk.
 Comprobar antes que el puerto esté libre con `sudo ss -tlnp 'sport = :8090'`.
 El servicio `web` publica el puerto interno 80. La API escucha internamente en
 8000 y no debe recibir el mapeo de la web. Nginx envía `/api` a `api:8000`.
@@ -21,7 +21,7 @@ de puertos de Dokploy. No basta con reiniciar el contenedor anterior.
 Abrir `http://192.168.1.50:8090` desde la misma red. Comprobar
 `http://192.168.1.50:8090/api/health`, que debe devolver `{"ok":true}`.
 
-La imagen API aplica las migraciones antes de iniciar. Desde la terminal del contenedor `api`, verificar que la revisión sea `0003 (head)`; también se pueden aplicar manualmente:
+La imagen API aplica las migraciones antes de iniciar. Desde la terminal del contenedor `api`, verificar que la revisión coincida con la indicada por `python -m alembic heads`; también se pueden aplicar manualmente:
 
 ```sh
 python -m alembic upgrade head

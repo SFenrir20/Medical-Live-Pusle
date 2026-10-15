@@ -1,11 +1,11 @@
-"""Idempotent materialization. Assignment to shifts is queried by event time, not ingestion time."""
+"""Idempotent materialization. Capture facts and contacts are independent of the frontend."""
 from datetime import datetime, timezone
 from uuid import uuid4
 
 from sqlalchemy import select
 
+from ...shared.locks import lock
 from ..broadcasts.models import RawEvent
-from ..shifts.service import lock
 from .classify import interested_in, phones_in
 from .models import EventFact, Lead, LeadAlias, LeadPhone
 

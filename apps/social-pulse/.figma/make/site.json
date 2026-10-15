@@ -6,5 +6,7 @@
   "accessibility": {
     "addBypassLinks": false,
     "ignoreReducedMotion": false
-  }
+  },
+  "title": "Medical Social Pulse",
+  "language": "es"
 }
