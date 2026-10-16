@@ -84,9 +84,14 @@ class LiveComment(Base):
     comment = Column(Text, nullable=False)
     phone_detected = Column(String(20))
     interested = Column(Boolean, nullable=False, server_default=text('false'))
+    # "No me contactan / no me contestan": a person saying she was not attended.
+    complaint = Column(Boolean, nullable=False, server_default=text('false'))
+    complaint_reviewed_by = Column(String(255))
+    complaint_reviewed_at = Column(DateTime(timezone=True))
     created_at = Column(DateTime(timezone=True), nullable=False)
 
     __table_args__ = (
+        Index('ix_live_comments_complaint', 'complaint', 'created_at'),
         Index('ix_live_comments_live_created', 'live_id', 'created_at'),
         Index('ix_live_comments_live_username', 'live_id', 'username'),
         Index('ix_live_comments_created', 'created_at'),
@@ -204,3 +209,43 @@ class ContactAudit(Base):
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
     __table_args__ = (Index('ix_contact_audit_registry', 'registry_id', 'created_at'),)
+
+
+class ContactAlert(Base):
+    """A contact already marked as contacted that sent its number again (see alerts.py).
+    One row per (contact, live); repeats raise the counter instead of opening more alerts."""
+    __tablename__ = 'contact_alerts'
+    id = Column(PK_BIG, primary_key=True, autoincrement=True)
+    registry_id = Column(PK_BIG, ForeignKey('phone_registry.id'), nullable=False)
+    live_id = Column(String(40), ForeignKey('lives.id'), nullable=False)
+    account_id = Column(String(32))
+    kind = Column(String(16), nullable=False)       # same_live | other_live | other_account
+    comment_at = Column(DateTime(timezone=True), nullable=False)
+    contacted_at = Column(DateTime(timezone=True), nullable=False)
+    advisor_id = Column(String(64))
+    repeats = Column(Integer, nullable=False, server_default='1')
+    last_seen_at = Column(DateTime(timezone=True), nullable=False)
+    status = Column(String(12), nullable=False, server_default='open')  # open|reviewed|dismissed
+    reviewed_by = Column(String(255))
+    reviewed_at = Column(DateTime(timezone=True))
+    note = Column(String(500))
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint('registry_id', 'live_id', name='uq_contact_alert_live'),
+        CheckConstraint("kind IN ('same_live','other_live','other_account')",
+                        name='ck_contact_alerts_kind'),
+        CheckConstraint("status IN ('open','reviewed','dismissed')",
+                        name='ck_contact_alerts_status'),
+        Index('ix_contact_alerts_status', 'status', 'created_at'),
+    )
+
+
+class ExportAudit(Base):
+    """Who downloaded contact data, and how much."""
+    __tablename__ = 'export_audit'
+    id = Column(PK_BIG, primary_key=True, autoincrement=True)
+    actor = Column(String(255), nullable=False)
+    kind = Column(String(32), nullable=False)
+    rows = Column(Integer, nullable=False)
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())

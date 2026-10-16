@@ -10,7 +10,10 @@ from ...shared.config import settings
 
 ROLES = ROLE_CODES
 
-MARKETING = {'screen:marketing', 'read', 'export'}
+# Review of suspicious contacts (re-sent numbers, "nobody contacted me" comments) and the
+# download of the contact list: supervisor, marketing head and manager.
+ALERTS = {'alerts:read', 'alerts:review', 'contacts:export'}
+MARKETING = {'screen:marketing', 'read', 'export', *ALERTS}
 # Attention workflow (validated server-side; none of these can write events):
 CONTACT_WORK = {'contacts:read', 'contacts:claim', 'contacts:update'}
 CONTACT_MANAGE = {*CONTACT_WORK, 'contacts:read_all', 'contacts:assign_any'}

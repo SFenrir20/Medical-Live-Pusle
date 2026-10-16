@@ -40,3 +40,15 @@ def test_phone_normalization_and_interest_negation():
     assert interested_in('¿Cuánto cuesta? Quiero información')
     assert not interested_in('no me interesa esa operación')
     assert not interested_in('hola buenas noches')
+
+
+def test_comments_saying_nobody_contacted_them_are_flagged():
+    from livepulse.modules.analytics.classify import complains_not_contacted as flagged
+    for text in ('No me contactan', 'nadie me ha llamado', 'Les escribo y no me contestan',
+                 'aún no me han contactado', 'sigo esperando respuesta', 'dejé mi número y nadie me escribe',
+                 'no me responden por whatsapp', 'Nunca me llamaron'):
+        assert flagged(text), text
+    for text in ('Ya me contactaron, gracias', 'me llamaron hoy', 'quiero información',
+                 'cuánto cuesta', 'me atendieron muy bien', 'no quiero operarme',
+                 'mi número es 987654321', ''):
+        assert not flagged(text), text

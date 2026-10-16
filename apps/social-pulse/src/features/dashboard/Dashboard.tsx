@@ -32,11 +32,21 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { downloadLiveComments, LiveApi } from "@/features/workspace/api";
+import { AlertsPanel } from "@/features/notifications/AlertsPanel";
+import { NotificationBell } from "@/features/notifications/NotificationBell";
 import { useBoard } from "@/features/workspace/useBoard";
 import { MessageStatus, SocialMessage, useWorkspace } from "@/features/workspace/useWorkspace";
 
 type View = "Pulso" | "Bandeja" | "Contactos" | "Ajustes";
-type MarketingView = "Resumen" | "Equipo" | "Transmisiones";
+type MarketingView = "Resumen" | "Equipo" | "Transmisiones" | "Alertas";
+
+const ROLE_LABEL: Record<string, string> = {
+  agente_ventas: "Agente call center",
+  gerente: "Gerente",
+  jefe_marketing: "Jefe de Marketing",
+  supervisor: "Supervisor",
+  admin: "Administrador",
+};
 type LiveSession = {
   id: string;
   account: string;
@@ -333,9 +343,9 @@ function LiveHistory({
   );
 }
 
-function MarketingDashboard() {
+function MarketingDashboard({ initialView = "Resumen" }: { initialView?: MarketingView }) {
   const { user, logout } = useAuth();
-  const [view, setView] = useState<MarketingView>("Resumen");
+  const [view, setView] = useState<MarketingView>(initialView);
   const { summary, lives, error: boardError } = useBoard(true);
   const now = useNow();
   const unassigned = { length: summary?.unassigned ?? 0 };
@@ -360,7 +370,7 @@ function MarketingDashboard() {
         <div className="mx-auto flex h-[68px] max-w-[1400px] items-center justify-between px-4 sm:px-6">
           <Logo />
           <nav className="hidden items-center gap-1 lg:flex">
-            {(["Resumen", "Equipo", "Transmisiones"] as MarketingView[]).map((item) => (
+            {(["Resumen", "Equipo", "Transmisiones", "Alertas"] as MarketingView[]).map((item) => (
               <button
                 type="button"
                 key={item}
@@ -374,8 +384,9 @@ function MarketingDashboard() {
             ))}
           </nav>
           <div className="flex items-center gap-2">
+            <NotificationBell onOpenAlerts={() => setView("Alertas")} />
             <span className="hidden rounded-full bg-violet-50 px-3 py-1.5 text-[11px] font-bold text-violet-700 sm:inline-flex">
-              Jefe de Marketing
+              {ROLE_LABEL[user?.role ?? ""] ?? "Marketing"}
             </span>
             <button
               type="button"
@@ -387,7 +398,9 @@ function MarketingDashboard() {
               </span>
               <span className="hidden text-left sm:block">
                 <span className="block text-sm font-semibold">{user?.name}</span>
-                <span className="block text-[11px] text-muted">Jefe de Marketing</span>
+                <span className="block text-[11px] text-muted">
+                  {ROLE_LABEL[user?.role ?? ""] ?? "Marketing"}
+                </span>
               </span>
               <LogOut size={16} className="text-muted" />
             </button>
@@ -424,7 +437,7 @@ function MarketingDashboard() {
         )}
 
         <div className="mt-6 flex gap-2 overflow-x-auto lg:hidden">
-          {(["Resumen", "Equipo", "Transmisiones"] as MarketingView[]).map((item) => (
+          {(["Resumen", "Equipo", "Transmisiones", "Alertas"] as MarketingView[]).map((item) => (
             <button
               type="button"
               key={item}
@@ -576,6 +589,8 @@ function MarketingDashboard() {
           </section>
         )}
 
+        {view === "Alertas" && <AlertsPanel />}
+
         {view === "Transmisiones" && (
           <section className="mt-6">
             <div>
@@ -629,8 +644,8 @@ function MarketingDashboard() {
 
       <nav className="sticky bottom-0 z-30 border-t border-line bg-white px-3 py-2 lg:hidden">
         <div className="mx-auto flex max-w-sm justify-around">
-          {(["Resumen", "Equipo", "Transmisiones"] as MarketingView[]).map((item, index) => {
-            const Icon = index === 0 ? Activity : index === 1 ? Users : Music2;
+          {(["Resumen", "Equipo", "Transmisiones", "Alertas"] as MarketingView[]).map((item, index) => {
+            const Icon = index === 0 ? Activity : index === 1 ? Users : index === 2 ? Music2 : Bell;
             return (
               <button
                 type="button"
@@ -651,7 +666,7 @@ function MarketingDashboard() {
   );
 }
 
-function AgentDashboard() {
+function AgentDashboard({ onOpenMarketing }: { onOpenMarketing?: () => void }) {
   const { user, logout } = useAuth();
   const [view, setView] = useState<View>("Pulso");
   const [phoneOnly, setPhoneOnly] = useState(true);
@@ -660,7 +675,6 @@ function AgentDashboard() {
   const [copiedPhoneId, setCopiedPhoneId] = useState<number | null>(null);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [page, setPage] = useState(1);
-  const [notificationsOpen, setNotificationsOpen] = useState(false);
   const permissions = user?.permissions ?? [];
   const canHistory = permissions.includes("read");
   const board = useBoard(canHistory);
@@ -1067,41 +1081,7 @@ function AgentDashboard() {
             ))}
           </nav>
           <div className="relative flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setNotificationsOpen((open) => !open)}
-              className="relative rounded-xl p-2.5 text-muted hover:bg-slate-100"
-              aria-label="Notificaciones"
-            >
-              <Bell size={20} />
-              <span className="absolute right-2 top-2 size-2 rounded-full border-2 border-white bg-red-500" />
-            </button>
-            {notificationsOpen && (
-              <div className="absolute right-0 top-12 z-40 w-80 rounded-2xl border border-line bg-white p-3 shadow-xl">
-                <div className="flex items-center justify-between px-2 py-2">
-                  <strong className="text-sm">Notificaciones</strong>
-                  <button type="button" onClick={() => setNotificationsOpen(false)}>
-                    <X size={16} className="text-muted" />
-                  </button>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    showPriority();
-                    setNotificationsOpen(false);
-                  }}
-                  className="flex w-full gap-3 rounded-xl p-3 text-left hover:bg-amber-50"
-                >
-                  <BellRing size={18} className="mt-0.5 text-amber-600" />
-                  <span>
-                    <strong className="block text-xs">5 contactos requieren atención</strong>
-                    <span className="mt-1 block text-[11px] text-muted">
-                      Revisa la bandeja prioritaria.
-                    </span>
-                  </span>
-                </button>
-              </div>
-            )}
+            <NotificationBell onOpenInbox={showPriority} onOpenAlerts={onOpenMarketing} />
             <button
               type="button"
               onClick={logout}
@@ -1113,7 +1093,9 @@ function AgentDashboard() {
               </span>
               <span className="hidden text-left sm:block">
                 <span className="block text-sm font-semibold">{user?.name}</span>
-                <span className="block text-[11px] text-muted">Agente call center</span>
+                <span className="block text-[11px] text-muted">
+                  {ROLE_LABEL[user?.role ?? ""] ?? "Agente call center"}
+                </span>
               </span>
               <LogOut size={16} className="text-muted" />
             </button>
@@ -1637,6 +1619,7 @@ function AgentDashboard() {
 export function Dashboard() {
   const { user } = useAuth();
   const screens = user?.screens ?? [];
+  const [marketingStart, setMarketingStart] = useState<MarketingView>("Resumen");
   const [current, setCurrent] = useState<"agent" | "marketing">(
     screens.includes("marketing") && !screens.includes("agent") ? "marketing" : "agent",
   );
@@ -1668,7 +1651,16 @@ export function Dashboard() {
           </button>
         ))}
       </div>
-      {current === "marketing" ? <MarketingDashboard /> : <AgentDashboard />}
+      {current === "marketing" ? (
+        <MarketingDashboard key={marketingStart} initialView={marketingStart} />
+      ) : (
+        <AgentDashboard
+          onOpenMarketing={() => {
+            setMarketingStart("Alertas");
+            setCurrent("marketing");
+          }}
+        />
+      )}
     </>
   );
 }
