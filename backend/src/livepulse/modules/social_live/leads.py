@@ -19,7 +19,7 @@ from sqlalchemy import func, or_, select, union_all
 
 from ...shared.db import get_session
 from ..analytics.models import UserRole
-from ..identity.roles import PERMISSIONS
+from ..identity.roles import permissions_of
 from . import contacts as workflow
 from . import queries
 from .models import Live, LiveComment, PhoneRegistry, TiktokAccount
@@ -37,7 +37,7 @@ board_reader = require_scope('contacts:read', 'read')
 
 
 def allowed(who, permission: str) -> bool:
-    return who.get('kind') == 'user' and permission in PERMISSIONS.get(who.get('role'), set())
+    return who.get('kind') == 'user' and permission in permissions_of(who.get('role'))
 
 
 def require(who, permission: str):
@@ -234,7 +234,7 @@ async def summary(who=Depends(board_reader), session=Depends(get_session)):
 
 async def team_members(session) -> list[dict]:
     rows = (await session.scalars(select(UserRole).where(
-        UserRole.role.in_(('agente_ventas', 'supervisor', 'tiktoker', 'care')))
+        UserRole.role.in_(('agente_ventas', 'supervisor')))
         .order_by(UserRole.display_name, UserRole.user_id))).all()
     return [{'id': r.user_id, 'name': r.display_name or r.user_id, 'role': r.role} for r in rows]
 

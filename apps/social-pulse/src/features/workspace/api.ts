@@ -40,6 +40,11 @@ export type LiveApi = {
   status: "scheduled" | "live" | "finished" | "cancelled";
   account: string | null;
   tiktoker: string | null;
+  /** Title of the LIVE: the TikToker writes her code in it (e.g. A1). */
+  title: string | null;
+  responsible_source: "title" | "manual" | null;
+  /** Why nobody is assigned, so the title can be fixed. */
+  responsible_note: "sin_titulo" | "titulo_sin_codigo" | "titulo_con_varios_codigos" | null;
   started_at: string;
   ended_at: string | null;
   duration_seconds: number | null;

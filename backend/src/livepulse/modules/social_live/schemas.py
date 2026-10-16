@@ -49,7 +49,15 @@ class AccountIn(BaseModel):
 class TiktokerIn(BaseModel):
     id: str = Field(min_length=1, max_length=64, pattern=r'^[A-Za-z0-9_.:-]+$')
     name: str = Field(min_length=1, max_length=100)
+    full_name: str | None = Field(default=None, max_length=100)
+    # What she writes in the live title, e.g. A1 (one letter and one or two digits).
+    code: str | None = Field(default=None, pattern=r'^[A-Za-z][0-9]{1,2}$')
     active: bool = True
+
+    @field_validator('code')
+    @classmethod
+    def upper(cls, value):
+        return value.upper() if value else value
 
 
 class LiveIn(Stamped):
@@ -59,6 +67,13 @@ class LiveIn(Stamped):
     account_id: str = Field(min_length=1, max_length=32)
     started_at: datetime | None = None
     status: Literal['scheduled', 'live'] = 'live'
+    title: str | None = Field(default=None, max_length=300)
+
+
+class LivePatch(BaseModel):
+    """Only the fields present are applied. tiktoker_id: null = decide from the title again."""
+    title: str | None = Field(default=None, max_length=300)
+    tiktoker_id: str | None = Field(default=None, min_length=1, max_length=64)
 
 
 class EventIn(Stamped):

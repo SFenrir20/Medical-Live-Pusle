@@ -11,13 +11,11 @@ An unset token is disabled. People can never obtain `ingest`.
 """
 import hmac
 
-from fastapi import Depends, Header, HTTPException
+from fastapi import Header, HTTPException
 
 from ...shared import auth as clerk
 from ...shared.config import settings
-from ...shared.db import get_session
-from ..analytics.models import UserRole
-from ..identity.roles import PERMISSIONS, role_for
+from ..identity.roles import permissions_of, role_for
 
 
 def _scopes(token: str) -> set[str]:
@@ -34,8 +32,7 @@ def _scopes(token: str) -> set[str]:
 def require_scope(*scopes: str):
     """Pass if the caller holds ANY of the given scopes."""
 
-    async def dependency(authorization: str = Header(default=''),
-                         session=Depends(get_session)):
+    async def dependency(authorization: str = Header(default='')):
         kind, _, token = authorization.partition(' ')
         token = token.strip()
         if kind.lower() != 'bearer' or not token:
@@ -50,9 +47,10 @@ def require_scope(*scopes: str):
             raise HTTPException(401, 'Token de servicio inválido.',
                                 headers={'WWW-Authenticate': 'Bearer'})
         person = clerk.verify_token(token)  # 401/503 if the session is not valid
-        row = await session.get(UserRole, person['id'])
-        role = role_for(person['id'], row.role if row else None)
-        if not PERMISSIONS[role] & set(scopes):
+        role = role_for(person['id'], person.get('role'))
+        if role is None:
+            raise HTTPException(403, 'Tu usuario no tiene un rol asignado en Clerk.')
+        if not permissions_of(role) & set(scopes):
             raise HTTPException(403, 'Tu rol no tiene permiso para esta operación.')
         return {'kind': 'user', 'user_id': person['id'], 'role': role}
     return dependency

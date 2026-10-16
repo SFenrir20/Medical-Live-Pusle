@@ -1,4 +1,4 @@
-/** Business roles, assigned by the backend (never trusted from the browser). */
+/** Business roles. Assigned in Clerk (Public metadata); the API verifies them in the session. */
 export type Role = "agente_ventas" | "gerente" | "jefe_marketing" | "supervisor" | "admin";
 export type ScreenName = "agent" | "marketing";
 
@@ -6,10 +6,12 @@ export interface User {
   id: string;
   name: string;
   email: string;
-  role: Role;
+  /** null = Clerk has not assigned a role: no access. */
+  role: Role | null;
   screens: ScreenName[];
   permissions: string[];
-  canManageRoles: boolean;
+  /** Why there is no access (shown to the person). */
+  reason: string | null;
 }
 
 export interface AuthState {

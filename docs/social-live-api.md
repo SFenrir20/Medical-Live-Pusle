@@ -33,27 +33,30 @@ Cabecera `Authorization: Bearer <token>`.
 | Captura (servidor de Social Live) | `SOCIAL_LIVE_TOKEN` | `ingest`: crear lives, eventos, teléfonos |
 | Medical 360 (servidor) | `MEDICAL360_TOKEN` | `read` + `contacts:read_all` |
 | Medical 360, exportación | `MEDICAL360_EXPORT_TOKEN` | además `export` |
-| Personas (Clerk) | JWT de sesión; rol guardado en el servidor | ver tabla de roles |
+| Personas (Clerk) | JWT de sesión; el rol viaja firmado en él (Public metadata) | ver tabla de roles |
 
 Los tokens de servicio **nunca** van al navegador. Ninguna persona puede escribir eventos
 (`ingest`). Un token vacío queda deshabilitado.
 
 ## Roles y permisos de atención
 
-| Rol | Pantalla | Estadísticas | Contactos |
+El rol se asigna **en Clerk** (Public metadata `{"livepulse": {"role": "..."}}`, ver `clerk.md`) y
+llega firmado en la sesión. Sin rol: sin acceso.
+
+| Rol (código en Clerk) | Pantalla | Estadísticas | Contactos |
 |---|---|---|---|
-| `agente_ventas` | su perfil | — | ve los libres y los suyos; tomar, liberar, cambiar estado de los suyos |
-| `gerente`, `jefe_marketing` | marketing | leer y exportar | solo conteos (no ve teléfonos) |
-| `supervisor` | ambas | leer y exportar | ve todos; asigna a cualquiera; historial |
-| `admin` (`ADMIN_USER_IDS`) | ambas | todo | todo + gestión de roles |
+| `agente_ventas` | atención de contactos | — | ve los libres y los suyos; tomar, liberar, cambiar estado de los suyos |
+| `gerente`, `jefe_marketing` | marketing y reportes | leer y exportar | solo conteos (no ve teléfonos) |
+| `supervisor` | vista agente y marketing | leer y exportar | ve todos; asigna a cualquiera; historial |
+| `admin` (`ADMIN_USER_IDS`, emergencia) | ambas | todo | todo |
 
 Permisos: `contacts:read`, `contacts:claim`, `contacts:update`, `contacts:read_all`,
-`contacts:assign_any` (más `read`, `export`, `roles:manage`). Matriz en
+`contacts:assign_any` (más `read`, `export`). Matriz en
 `modules/identity/roles.py`. Se validan en el servidor.
 
 Atención (`/api`): `GET /inbox`, `PATCH /leads/{id}` (`action: claim|release|assign`,
 `status`, `expected_status`, `expect_unassigned`), `GET /leads/summary`, `GET /team`,
-`GET /leads/{id}/history`, `GET /auth/me`, `PUT /auth/me/profile`.
+`GET /leads/{id}/history`, `GET /auth/me`, `PUT /auth/me/profile`. Los roles no se asignan por API.
 
 - Tomar un contacto es una actualización condicionada: si dos asesores lo intentan a la vez,
   uno recibe `409`. Cambiar el estado de un contacto libre lo toma.
@@ -73,14 +76,41 @@ Atención (`/api`): `GET /inbox`, `PATCH /leads/{id}` (`action: claim|release|as
 - Reportes por día, semana, mes, hora, cuenta y TikToker usan la **fecha de primera captura**
   en calendario de Lima (un contacto a las 23:50 de Lima cuenta en ese día).
 
-## Transmisión y responsable
+## Transmisión y responsable (código en el título)
 
-`lives.tiktoker_id` identifica a la responsable asignada explícitamente al LIVE.
-Si falta, los reportes muestran **«Sin asignar»**. El monitor automático no inventa
-una responsable. `GET /lives/{id}` conserva `intervals` y `tiktokers` por compatibilidad,
-con una única responsable para el LIVE completo. Los teléfonos se cuentan en el momento
-de su primera captura y se atribuyen a la responsable de ese LIVE.
-La asistencia histórica no interviene en los cálculos.
+La TikToker escribe **su código en el título del LIVE** y el sistema lo lee para saber quién
+está al aire y poder validar sus métricas.
+
+| TikToker | Nombre usado | ID interno | Código en el título |
+|---|---|---|---|
+| Ashley | Ash | `TK-A01` | `A1` |
+| Maria Luisa | Mari | `TK-M02` | `M2` |
+| Lucía | Lu | `TK-L03` | `L3` |
+| Briggite | Bri | `TK-B04` | `B4` |
+| Fernanda | Fer | `TK-F05` | `F5` |
+| Nahit | Nahit | `TK-N06` | `N6` |
+
+Reglas (`modules/social_live/titles.py`):
+
+- El código cuenta solo como **palabra completa** y solo si es de una TikToker conocida
+  (`Cirugías A1`, `[m2]`, `L3-LIVE`; no `MA1`, `A12` ni `A1B`). No distingue mayúsculas.
+- **Un** código identifica a la responsable. **Ninguno** o **varios distintos** no identifican
+  a nadie: el LIVE queda **«Sin asignar»**, nunca se adivina. La API informa el motivo en
+  `responsible_note` (`sin_titulo`, `titulo_sin_codigo`, `titulo_con_varios_codigos`).
+- El monitor lee el título al conectar y lo revisa cada 5 minutos: si la TikToker lo edita en
+  vivo y aparece otro código, se actualiza la responsable. Un título posterior **sin** código
+  no borra a la responsable ya identificada.
+- Una asignación manual (`PATCH /api/social-live/lives/{id}` con `tiktoker_id`) tiene prioridad
+  y el título no la cambia; con `tiktoker_id: null` la decisión vuelve al título.
+- Todo se atribuye por LIVE completo (una responsable por transmisión). La asistencia no interviene.
+
+`GET /lives/{id}` y la lista devuelven `title`, `tiktoker` (nombre usado),
+`responsible_source` (`title` | `manual`) y `responsible_note`. Los contactos usan la
+responsable del LIVE donde se capturaron por primera vez («Responsable del Live»).
+
+Agregar o cambiar una TikToker: `POST /api/social-live/tiktokers`
+`{"id": "TK-X07", "name": "Xi", "full_name": "Ximena", "code": "X7"}` (el código es una letra y
+uno o dos dígitos y debe ser único; `409` si ya existe).
 
 ## Ingestión — `/api/social-live` (token `ingest`)
 
@@ -181,8 +211,10 @@ las transmisiones, marca como publicados los eventos ya plegados y mueve el anti
    origen de Social Pulse), `VITE_CLERK_PUBLISHABLE_KEY`, `WEB_PORT`, `CORS_ORIGINS` si aplica.
 3. Reconstruir y desplegar `api`, `worker`, `monitor` y `social` (no basta reiniciar). La API
    aplica `alembic upgrade head` al iniciar.
-4. `python -m alembic current` debe mostrar `0007 (head)`.
-5. Esperar el primer ciclo del worker (convierte el historial) y revisar logs.
+4. `python -m alembic current` debe mostrar `0008 (head)` (carga a las 6 TikTokers).
+5. Esperar el primer ciclo del worker (convierte el historial) y revisar logs. Los LIVE que ya
+   estaban al aire reciben su título en ≤5 min tras reiniciar `monitor`; los LIVE anteriores
+   (sin título guardado) siguen «Sin asignar» hasta asignarlos con `PATCH` si hace falta.
 6. Comprobar: `/api/health`, `/api/auth/me` sin sesión → `401` (no `404`), y en Marketing que el
    conteo de teléfonos coincide con el registro.
 7. En Medical 360: ajustar `LIVEPULSE_API_URL` y token, y redesplegar.
@@ -194,4 +226,7 @@ las transmisiones, marca como publicados los eventos ya plegados y mueve el anti
 - **Leadsales**: el CSV del modelo anterior sigue en `/v1/contacts/export/leadsales` (modelo
   legado); no está conectado al registro único ni se ha probado la importación.
 - Ajustes de pantalla (notificaciones, canales): locales.
+- **Lectura del título en TikTok**: depende de que TikTok entregue la información de la sala
+  (`room/info`); en directos con restricción de edad no está disponible y el LIVE queda sin
+  asignar. No se ha probado contra un LIVE real.
 - Historial anterior a la ventana: se convierten métricas y teléfonos, no el texto de comentarios.

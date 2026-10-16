@@ -31,6 +31,8 @@ class Broadcast(Base):
     account_id: Mapped[str] = mapped_column(String(32), nullable=False)
     tiktok_username: Mapped[str] = mapped_column(String(64), nullable=False)
     room_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    # Title of the TikTok LIVE; carries the code of the TikToker on air.
+    title: Mapped[str | None] = mapped_column(String(200), nullable=True)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # True solo tras LiveEnd + gracia/re-chequeo. Un corte de red no lo marca.

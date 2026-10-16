@@ -1,31 +1,27 @@
-"""Role gates are server-owned. Registration never grants staff privileges."""
+"""Gates of the legacy /v1 analytics routes. The role is the one assigned in Clerk (see
+identity/roles.py); there is no second role table to keep in step."""
 from fastapi import Depends, HTTPException
-from sqlalchemy.dialects.postgresql import insert
 
 from ...shared.auth import get_current_user
 from ...shared.config import settings
-from ...shared.db import get_session
-from .models import UserRole
+
+# Clerk role -> the legacy section it opens.
+LEGACY_SECTION = {'supervisor': 'admin', 'gerente': 'marketing', 'jefe_marketing': 'marketing',
+                  'agente_ventas': 'care'}
 
 
-async def role_of(session, user):
+def role_of(user) -> str | None:
     if user['id'] in settings.admin_user_ids:
         return 'admin'
-    row = await session.get(UserRole, user['id'])
-    return row.role if row else 'tiktoker'
+    return LEGACY_SECTION.get(user.get('role'))
 
 
 def require_role(*roles):
-    async def dependency(user=Depends(get_current_user), session=Depends(get_session)):
-        role = await role_of(session, user)
+    async def dependency(user=Depends(get_current_user)):
+        role = role_of(user)
+        if role is None:
+            raise HTTPException(403, 'Tu usuario no tiene un rol asignado en Clerk.')
         if role != 'admin' and role not in roles:
             raise HTTPException(403, 'No tienes permisos para esta sección.')
         return user
     return dependency
-
-
-async def register(session, user):
-    await session.execute(insert(UserRole).values(user_id=user['id'], role='tiktoker')
-                          .on_conflict_do_nothing(index_elements=['user_id']))
-    await session.commit()
-    return await role_of(session, user)

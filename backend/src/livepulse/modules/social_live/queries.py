@@ -17,6 +17,7 @@ from sqlalchemy import func, select
 
 from ...shared.config import settings
 from ..analytics.models import MonitorState
+from . import titles
 from .models import (
     CapturedPhone,
     Live,
@@ -93,8 +94,13 @@ def metrics_dict(m: LiveMetrics | None) -> dict:
 class Attribution:
     """Resolve the responsible TikToker explicitly associated with a LIVE."""
 
-    def __init__(self, tiktokers):
+    def __init__(self, tiktokers, codes=None):
         self._tiktokers = tiktokers
+        self._codes = codes or {}
+
+    def note(self, live: Live):
+        """Why a live has no responsible, so the title can be fixed at the source."""
+        return titles.note_for(live.title, self._codes, live.tiktoker_id)
 
     def name_of(self, ident):
         return self._tiktokers.get(ident, ident) if ident else UNASSIGNED
@@ -111,8 +117,9 @@ class Attribution:
 
 
 async def load_attribution(session) -> Attribution:
-    tiktokers = {t.id: t.name for t in (await session.scalars(select(Tiktoker))).all()}
-    return Attribution(tiktokers)
+    rows = (await session.scalars(select(Tiktoker))).all()
+    return Attribution({t.id: t.name for t in rows},
+                       {t.code.upper(): t.id for t in rows if t.code and t.active})
 
 
 def involves(shares, tiktoker_id) -> bool:
@@ -141,13 +148,15 @@ async def fetch_lives(session, date_from=None, date_to=None, account_id=None, st
     return (await session.execute(date_filters(query, date_from, date_to, account_id, status))).all()
 
 
-def live_summary(live, metrics, account, shares) -> dict:
+def live_summary(live, metrics, account, shares, note=None) -> dict:
     staff = [{'id': k, 'name': name, 'share': round(frac, 4)}
              for k, (name, frac) in sorted(shares.items(), key=lambda kv: -kv[1][1])]
     assigned = [s for s in staff if s['id'] is not None]
     primary = assigned[0] if assigned else {'id': None, 'name': UNASSIGNED}
     return {'id': live.id, 'status': live.status,
             'tiktoker_id': primary['id'], 'tiktoker': primary['name'], 'tiktokers': staff,
+            'title': live.title, 'responsible_source': live.responsible_source,
+            'responsible_note': note,
             'account_id': live.account_id,
             'account': ('@' + account.username) if account else None,
             'started_at': iso(live.started_at), 'started_at_lima': lima_iso(live.started_at),
@@ -162,7 +171,7 @@ async def list_lives(session, limit, offset, tiktoker_id=None, **filters):
     for live, metrics, account in rows:
         shares = attribution.shares(live)
         if involves(shares, tiktoker_id):
-            kept.append(live_summary(live, metrics, account, shares))
+            kept.append(live_summary(live, metrics, account, shares, attribution.note(live)))
     page = kept[offset:offset + limit + 1]
     return {'items': page[:limit], 'next_offset': offset + limit if len(page) > limit else None}
 
@@ -198,7 +207,7 @@ async def live_detail(session, live: Live):
     rows = await live_phone_rows(session, live)
     firsts = [reg for app, reg in rows if app.is_new]
     times = [t for t in (contact_time_seconds(reg) for reg in firsts) if t is not None]
-    return {**live_summary(live, metrics, account, attribution.shares(live)),
+    return {**live_summary(live, metrics, account, attribution.shares(live), attribution.note(live)),
             'intervals': [{'start': iso(a), 'end': iso(b), 'tiktoker_id': uid, 'tiktoker': name}
                           for a, b, uid, name in attribution.intervals(live)],
             'comments_available': await comments_state(session, live) != 'purged',
@@ -523,7 +532,8 @@ async def monitor(session):
             'status': state.status if state else 'not_started',
             'heartbeat': iso(state.observed_at) if state else None,
             'on_air': on_air, 'live_id': live.id if live else None,
-            'tiktoker': who,   # explicitly assigned LIVE host, if known
+            'tiktoker': who,   # the LIVE host named by the title code (or set by hand), if known
+            'title': live.title if live else None,
             'started_at': stamp(live.started_at if live else None),
             'ended_at': stamp(live.ended_at if live else None),
             'metrics': metrics_dict(metrics) if live else None,
