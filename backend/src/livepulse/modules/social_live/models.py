@@ -41,7 +41,11 @@ class TiktokAccount(Base):
 class Tiktoker(Base):
     __tablename__ = 'tiktokers'
     id = Column(String(64), primary_key=True)
+    # Name used in reports; full_name is for reference. `code` is what the TikToker writes in
+    # the live title (e.g. A1) so the system can tell who is on air.
     name = Column(String(100), nullable=False)
+    full_name = Column(String(100))
+    code = Column(String(8), unique=True)
     active = Column(Boolean, nullable=False, server_default=text('true'))
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
@@ -51,6 +55,9 @@ class Live(Base):
     id = Column(String(40), primary_key=True)
     # Optional explicit LIVE host. Missing assignment remains unassigned.
     tiktoker_id = Column(String(64), ForeignKey('tiktokers.id'))
+    # title = read from the live title code; manual = set through the API (never overridden).
+    responsible_source = Column(String(12))
+    title = Column(String(200))
     account_id = Column(String(32), ForeignKey('tiktok_accounts.id'), nullable=False)
     started_at = Column(DateTime(timezone=True), nullable=False)
     ended_at = Column(DateTime(timezone=True))

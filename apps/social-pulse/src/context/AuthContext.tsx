@@ -14,16 +14,17 @@ import { AuthContextType, Role, ScreenName, User } from "@/types";
 
 interface MeResponse {
   id: string;
-  role: Role;
+  role: Role | null;
   screens: ScreenName[];
   permissions: string[];
-  can_manage_roles: boolean;
+  reason: string | null;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 /**
- * Identity comes from Clerk; the role and screens come from the backend (/api/auth/me).
+ * Identity AND role come from Clerk; /api/auth/me returns the role the server verified in the
+ * session and the screens it opens.
  * Fail closed: if the role cannot be loaded the person gets no dashboard, not a default one.
  */
 export function AuthProvider({ children }: { children: React.ReactNode }) {
@@ -88,7 +89,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           role: profile.role,
           screens: profile.screens,
           permissions: profile.permissions,
-          canManageRoles: profile.can_manage_roles,
+          reason: profile.reason,
         }
       : null;
     return {

@@ -5,6 +5,13 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+asyncpg://livepulse:livepulse@localhost:5432/livepulse"
     clerk_issuer: str = ""
     clerk_authorized_parties: list[str] = []
+    # Roles are assigned in Clerk (user Public metadata: {"livepulse": {"role": "..."}}).
+    # The session token carries them in this claim (Sessions > Customize session token:
+    # {"metadata": "{{user.public_metadata}}"}).
+    clerk_roles_claim: str = "metadata"
+    # Optional. Only used when the session token does NOT carry the claim yet: the role is
+    # then read from the Clerk Backend API. Never put this key in a frontend variable.
+    clerk_secret_key: str = ""
     admin_user_ids: list[str] = []
     # Service tokens (Authorization: Bearer). Empty = that credential is disabled.
     social_live_token: str = ""          # Medical Social Live: write events

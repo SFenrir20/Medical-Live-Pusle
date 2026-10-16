@@ -15,7 +15,7 @@ from ...shared.config import settings
 from ..broadcasts.models import Broadcast, RawEvent
 from .models import Live, LiveMetrics, TiktokAccount
 from .schemas import EventIn
-from .service import aware_utc, finish_live, ingest, utcnow
+from .service import apply_title, aware_utc, finish_live, ingest, utcnow
 
 PREFIX = 'TT-'
 BATCH = 200
@@ -57,6 +57,7 @@ async def ensure_live(session, broadcast: Broadcast) -> Live:
     session.add(live)
     session.add(LiveMetrics(live_id=live.id, created_at=now, updated_at=now))
     await session.flush()
+    await apply_title(session, live, broadcast.title)  # the code in the title names the host
     return live
 
 
@@ -148,6 +149,8 @@ async def sync_status(factory) -> None:
             select(Broadcast).where(Broadcast.id.in_(ids)))).all()}
         for live in open_lives:
             broadcast = broadcasts.get(int(live.id[len(PREFIX):]))
+            if broadcast is not None and broadcast.title and broadcast.title != live.title:
+                await apply_title(session, live, broadcast.title)  # title edited while on air
             if broadcast is not None and broadcast.ended_at is not None:
                 await finish_live(session, live, broadcast.ended_at, 'finished')
         for live in closed_lives:

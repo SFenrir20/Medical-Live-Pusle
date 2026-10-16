@@ -7,6 +7,7 @@ from sqlalchemy import select, text
 from ...shared.config import settings
 from ...shared.locks import lock
 from ..analytics.models import MonitorState
+from ..social_live.titles import clean_title
 from .models import Broadcast
 
 
@@ -30,7 +31,7 @@ class BroadcastStore:
                                           {'key': key})
                     await session.commit()
 
-    async def connected(self, account, room, now):
+    async def connected(self, account, room, now, title=None):
         if not room:
             raise ValueError('Missing provider room ID')
         async with self.factory() as session, session.begin():
@@ -52,6 +53,9 @@ class BroadcastStore:
                 # Rejoining the same room corrects a previous offline observation.
                 broadcast.ended_at = None
                 broadcast.end_confirmed = False
+            title = clean_title(title)
+            if title:
+                broadcast.title = title
             state = await session.get(MonitorState, account)
             if state is None:
                 state = MonitorState(account_id=account)
@@ -60,6 +64,19 @@ class BroadcastStore:
             state.offline_since, state.last_error = None, None
             await session.flush()
             return broadcast.id
+
+    async def title_seen(self, account, title):
+        """The live title can be edited while on air; keep the latest one (it carries the code
+        of the TikToker who is on)."""
+        title = clean_title(title)
+        if not title:
+            return
+        async with self.factory() as session, session.begin():
+            broadcast = await session.scalar(select(Broadcast).where(
+                Broadcast.account_id == account, Broadcast.ended_at.is_(None))
+                .order_by(Broadcast.started_at.desc()).limit(1))
+            if broadcast is not None and broadcast.title != title:
+                broadcast.title = title
 
     async def touch(self, account, now):
         async with self.factory() as session, session.begin():

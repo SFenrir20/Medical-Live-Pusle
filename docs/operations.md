@@ -3,7 +3,7 @@
 ## Servidor de pruebas
 
 1. Desplegar `developer` con las variables Clerk actuales y las imágenes reconstruidas. API aplica Alembic hasta `head` antes de iniciar.
-2. Registrar un administrador en Clerk, obtener su ID y configurar `ADMIN_USER_IDS=["user_..."]`; reiniciar API. Entrar a Panel del equipo para asignar los roles de las personas que hayan abierto ese panel.
+2. Personalizar el token de sesión en Clerk (`{"metadata": "{{user.public_metadata}}"}`) y asignar a cada persona su rol en **Public metadata** (`{"livepulse": {"role": "..."}}`); ver `docs/clerk.md`. `ADMIN_USER_IDS=["user_..."]` queda solo como acceso de emergencia.
 3. Habilitar perfil Compose `live` en Dokploy para arrancar **monitor y worker**. No requiere que una TikToker tenga abierto el navegador.
 4. Comprobar `/v1/monitor/status` desde Marketing. Las cuentas sin señal reciente requieren revisar logs; no se debe interpretar ausencia de datos como cero espectadores.
 5. Probar LIVE de ambas cuentas, corte de red, reinicio del monitor y exportación de contactos. Las pruebas simuladas del CI no sustituyen esta comprobación.

@@ -1,12 +1,14 @@
-"""Business roles of Medical Social Pulse and what each one may do.
+"""What each business role may do. The role itself is assigned in Clerk.
 
-Roles are stored server-side (user_roles, keyed by the Clerk user id). Neither the browser
-nor Clerk metadata is trusted for authorization. Edit PERMISSIONS to change what a role can do.
+Clerk user Public metadata (editable only from the Clerk dashboard/Backend API, never by the
+user):   {"livepulse": {"role": "agente_ventas" | "gerente" | "jefe_marketing" | "supervisor"}}
+The role travels inside the signed session token, so it cannot be forged. A person without a
+valid role has no access. Edit PERMISSIONS to change what a role can do.
 """
+from ...shared.auth import ROLE_CODES
 from ...shared.config import settings
 
-ROLES = ('agente_ventas', 'gerente', 'jefe_marketing', 'supervisor')
-DEFAULT_ROLE = 'agente_ventas'  # least privilege: own profile only
+ROLES = ROLE_CODES
 
 MARKETING = {'screen:marketing', 'read', 'export'}
 # Attention workflow (validated server-side; none of these can write events):
@@ -19,22 +21,23 @@ PERMISSIONS: dict[str, set[str]] = {
     'jefe_marketing': set(MARKETING),
     # Both screens plus the operational view, to diagnose failures.
     'supervisor': {'screen:agent', *MARKETING, 'monitor', *CONTACT_MANAGE},
-    # Technical owner (ADMIN_USER_IDS): everything, including role management.
-    'admin': {'screen:agent', *MARKETING, 'monitor', *CONTACT_MANAGE, 'roles:manage'},
-    # Legacy LivePulse mobile roles, kept working.
-    'tiktoker': {'screen:agent', *CONTACT_WORK},
-    'marketing': {'screen:marketing', 'read'},
-    'care': {'screen:agent', *CONTACT_WORK},
+    # Break-glass owner (ADMIN_USER_IDS) in case Clerk metadata is misconfigured.
+    'admin': {'screen:agent', *MARKETING, 'monitor', *CONTACT_MANAGE},
 }
 
 
-def role_for(user_id: str, stored: str | None) -> str:
+def role_for(user_id: str, clerk_role: str | None) -> str | None:
+    """The effective role, or None = no access."""
     if user_id in settings.admin_user_ids:
         return 'admin'
-    return stored if stored in PERMISSIONS else DEFAULT_ROLE
+    return clerk_role if clerk_role in PERMISSIONS else None
 
 
-def screens_for(role: str) -> list[str]:
-    allowed = PERMISSIONS.get(role, set())
+def permissions_of(role: str | None) -> set[str]:
+    return PERMISSIONS.get(role, set()) if role else set()
+
+
+def screens_for(role: str | None) -> list[str]:
+    allowed = permissions_of(role)
     return [name.split(':', 1)[1] for name in ('screen:agent', 'screen:marketing')
             if name in allowed]

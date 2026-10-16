@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from livepulse.entrypoints.api import app
 from livepulse.entrypoints.worker import process_batch
-from livepulse.modules.analytics.models import EventFact, Lead, LeadAlias, LeadPhone, UserRole
+from livepulse.modules.analytics.models import EventFact, Lead, LeadAlias, LeadPhone
 from livepulse.modules.analytics.processor import handle_event
 from livepulse.modules.analytics.reporting import lives
 from livepulse.modules.broadcasts.lifecycle import BroadcastStore
@@ -41,8 +41,9 @@ async def database(monkeypatch):
     async def session():
         async with factory() as value:
             yield value
-    def user(x_test_user: str = Header(default='ana')):
-        return {'id': x_test_user, 'accounts': ['medical', 'medical-2']}
+    def user(x_test_user: str = Header(default='ana'), x_test_role: str = Header(default='')):
+        # The role Clerk would carry in the session token.
+        return {'id': x_test_user, 'role': x_test_role or None}
     app.dependency_overrides[get_session] = session
     app.dependency_overrides[get_current_user] = user
     try:
@@ -129,37 +130,41 @@ async def test_failed_batch_rolls_back_and_retry_has_one_fact(database):
 
 
 async def test_roles_and_leadsales_export_are_separated(database):
+    """Legacy /v1 routes follow the role assigned in Clerk; there is no role table to edit."""
     factory, client = database
-    assert (await client.get('/v1/capabilities')).json()['role'] == 'tiktoker'
+    assert (await client.get('/v1/capabilities')).json()['role'] is None
     assert (await client.get('/v1/contacts')).status_code == 403
     assert (await client.get('/v1/analytics/lives')).status_code == 403
     assert (await client.get('/v1/integrations/medical360/lives')).status_code == 401
     assert (await client.get('/v1/integrations/medical360/lives',
                             headers={'X-Medical360-Token': 'server-secret'})).status_code == 200
-    response = await client.put('/v1/staff/users/ana/role', json={'role': 'care'},
-                                headers={'X-Test-User': 'boss'})
-    assert response.status_code == 200
-    assert (await client.get('/v1/analytics/lives')).status_code == 403
-    contact = (await client.post('/v1/contacts/manual', json={'text': '+51 987654321',
-                                                           'username': '=FORMULA()'})).json()
-    ready = await client.patch('/v1/contacts/' + contact['id'],
+    # Roles are no longer assignable through this API.
+    assert (await client.put('/v1/staff/users/ana/role', json={'role': 'care'},
+                             headers={'X-Test-User': 'boss'})).status_code in (404, 405)
+    care = {'X-Test-Role': 'agente_ventas'}      # Clerk: agente_ventas -> contacts section
+    assert (await client.get('/v1/analytics/lives', headers=care)).status_code == 403
+    marketing = {'X-Test-Role': 'jefe_marketing'}
+    assert (await client.get('/v1/analytics/lives', headers=marketing)).status_code == 200
+    assert (await client.get('/v1/contacts', headers=marketing)).status_code == 403
+    contact = (await client.post('/v1/contacts/manual', headers=care, json={
+        'text': '+51 987654321', 'username': '=FORMULA()'})).json()
+    ready = await client.patch('/v1/contacts/' + contact['id'], headers=care,
                                json={'status': 'ready', 'expected_status': 'new'})
     assert ready.status_code == 200
-    exported = (await client.post('/v1/contacts/export/leadsales')).json()['csv']
+    exported = (await client.post('/v1/contacts/export/leadsales', headers=care)).json()['csv']
     assert exported.startswith('Area code,Phone,Name,Value,Email,Tags,Company,Assignee')
     assert '51,987654321' in exported and "'=FORMULA()" in exported
     assert len(exported.splitlines()) == 2
-    assert (await client.post('/v1/contacts/manual', json={'text': '987654321',
-                                                         'username': 'another'})).json()['id'] == contact['id']
-    deduplicated = (await client.post('/v1/contacts/export/leadsales')).json()['csv']
+    assert (await client.post('/v1/contacts/manual', headers=care, json={
+        'text': '987654321', 'username': 'another'})).json()['id'] == contact['id']
+    deduplicated = (await client.post('/v1/contacts/export/leadsales', headers=care)).json()['csv']
     assert '51,987654321' in deduplicated
     assert len(deduplicated.splitlines()) == 2
-    assert (await client.patch('/v1/contacts/' + contact['id'],
+    assert (await client.patch('/v1/contacts/' + contact['id'], headers=care,
         json={'status': 'closed', 'expected_status': 'new'})).status_code == 409
     async with factory() as s:
         assert await s.scalar(select(func.count()).select_from(Lead)) == 1
         assert await s.scalar(select(func.count()).select_from(LeadAlias)) == 2
-        assert (await s.get(UserRole, 'ana')).role == 'care'
 
 
 async def test_medical360_bridge_exposes_comment_phone_state_and_monitor(database):

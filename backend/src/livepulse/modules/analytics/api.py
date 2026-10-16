@@ -16,7 +16,7 @@ from ...shared.config import settings
 from ...shared.db import get_session
 from ...shared.locks import lock
 from ..broadcasts.models import RawEvent
-from .access import register, require_role
+from .access import require_role, role_of
 from .classify import phones_in
 from .medical360 import inbox as m360_inbox
 from .medical360 import monitor as m360_monitor
@@ -27,8 +27,6 @@ from .models import (
     LeadAudit,
     LeadPhone,
     MonitorState,
-    RoleAudit,
-    UserRole,
 )
 from .processor import contact_for
 from .reporting import lives
@@ -40,8 +38,8 @@ admin = require_role()
 
 
 @router.get('/capabilities')
-async def capabilities(user=Depends(get_current_user), session=Depends(get_session)):
-    return {'role': await register(session, user)}
+async def capabilities(user=Depends(get_current_user)):
+    return {'role': role_of(user)}
 
 
 @router.get('/analytics/lives')
@@ -93,29 +91,6 @@ async def monitor_status(user=Depends(marketing), session=Depends(get_session)):
                 .where(EventFact.event_id.is_(None))),
             'unlinked_events': await session.scalar(select(func.count()).select_from(RawEvent)
                 .where(RawEvent.broadcast_id.is_(None)))}
-
-
-@router.get('/staff/users')
-async def users(user=Depends(admin), session=Depends(get_session)):
-    return [{'id': r.user_id, 'role': 'admin' if r.user_id in settings.admin_user_ids else r.role}
-            for r in (await session.scalars(select(UserRole).order_by(UserRole.user_id))).all()]
-
-
-class RoleBody(BaseModel):
-    role: Literal['tiktoker', 'marketing', 'care', 'admin']
-
-
-@router.put('/staff/users/{user_id}/role')
-async def set_role(user_id: str, body: RoleBody, user=Depends(admin), session=Depends(get_session)):
-    if user_id in settings.admin_user_ids or user_id == user['id']:
-        raise HTTPException(409, 'No puedes cambiar tu propio rol ni el administrador inicial.')
-    row = await session.get(UserRole, user_id, with_for_update=True)
-    if row is None:
-        raise HTTPException(404, 'La persona debe entrar primero a LivePulse.')
-    row.role = body.role
-    session.add(RoleAudit(id=str(uuid4()), actor=user['id'], user_id=user_id, role=body.role))
-    await session.commit()
-    return {'id': user_id, 'role': row.role}
 
 
 @router.get('/contacts')

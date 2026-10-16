@@ -20,6 +20,7 @@ from .schemas import (
     EventIn,
     FinishIn,
     LiveIn,
+    LivePatch,
     PhoneIn,
     PhoneStatus,
     PhoneUpdate,
@@ -81,12 +82,18 @@ async def upsert_account(body: AccountIn, session=Depends(get_session)):
 async def upsert_tiktoker(body: TiktokerIn, session=Depends(get_session)):
     async with session.begin():
         row = await session.get(Tiktoker, body.id)
-        if row is None:
-            row = Tiktoker(**body.model_dump())
-            session.add(row)
-        else:
-            row.name, row.active = body.name, body.active
-    return {'id': row.id, 'name': row.name, 'active': row.active}
+        try:
+            if row is None:
+                row = Tiktoker(**body.model_dump())
+                session.add(row)
+            else:
+                row.name, row.active = body.name, body.active
+                row.full_name, row.code = body.full_name, body.code
+            await session.flush()
+        except IntegrityError:
+            raise HTTPException(409, 'Ese código ya pertenece a otra TikToker.') from None
+    return {'id': row.id, 'name': row.name, 'full_name': row.full_name, 'code': row.code,
+            'active': row.active}
 
 
 @social.post('/lives', status_code=201)
@@ -98,6 +105,16 @@ async def create_live(body: LiveIn, response: Response, session=Depends(get_sess
     return {'id': live.id, 'status': live.status, 'tiktoker_id': live.tiktoker_id,
             'account_id': live.account_id, 'started_at': queries.iso(live.started_at),
             'created': created}
+
+
+@social.patch('/lives/{live_id}')
+async def patch_live(live_id: str, body: LivePatch, session=Depends(get_session)):
+    """Fix a live's title or responsible (a given tiktoker_id is manual and wins over the title)."""
+    async with session.begin():
+        live = await _live(session, live_id)
+        await service.update_live(session, live, body)
+    async with session.begin():
+        return await queries.live_detail(session, await _live(session, live_id))
 
 
 @social.post('/lives/{live_id}/events')

@@ -41,6 +41,9 @@ type LiveSession = {
   id: string;
   account: string;
   host: string;
+  /** Why there is no host (title without a code, etc.); empty when there is one. */
+  hostNote: string;
+  title: string;
   startedAt: string;
   endedAt: string;
   duration: string;
@@ -75,11 +78,23 @@ function clock(seconds: number) {
   return h > 0 ? `${h} h ${String(m).padStart(2, "0")} min` : `${m} min`;
 }
 
+const HOST_NOTES = {
+  sin_titulo: "el LIVE no tiene título",
+  titulo_sin_codigo: "el título no tiene código",
+  titulo_con_varios_codigos: "el título tiene varios códigos",
+} as const;
+
+/** "Ash" or, when unknown, "Sin asignar (el título no tiene código)". */
+const hostLabel = (session: LiveSession) =>
+  session.hostNote ? `${session.host} (${session.hostNote})` : session.host;
+
 function toLiveSession(live: LiveApi): LiveSession {
   return {
     id: live.id,
     account: live.account ?? "—",
     host: live.tiktoker ?? "Sin asignar",
+    hostNote: live.responsible_note ? HOST_NOTES[live.responsible_note] : "",
+    title: live.title ?? "",
     startedAt: lima(live.started_at),
     endedAt: lima(live.ended_at),
     duration: clock(live.duration_seconds ?? 0),
@@ -420,7 +435,9 @@ function MarketingDashboard() {
                       </span>
                     </div>
                     <p className="mt-1 text-xs text-muted">
-                      {live.tiktoker ?? "Sin asignar"} · iniciado {lima(live.started_at)}
+                      {live.tiktoker ?? "Sin asignar"}
+                      {live.responsible_note ? ` (${HOST_NOTES[live.responsible_note]})` : ""} ·
+                      iniciado {lima(live.started_at)}
                     </p>
                   </div>
                   <span className="text-xs font-semibold text-muted">
@@ -444,7 +461,7 @@ function MarketingDashboard() {
                   <div className="flex-1">
                     <strong className="text-sm">{session.account}</strong>
                     <p className="mt-1 text-xs text-muted">
-                      {session.host} · {session.duration} · finalizado
+                      {hostLabel(session)} · {session.duration} · finalizado
                     </p>
                   </div>
                   <span className="rounded-full bg-violet-50 px-3 py-1.5 text-xs font-semibold text-violet-700">
@@ -986,7 +1003,8 @@ function AgentDashboard() {
                         </span>
                       </div>
                       <p className="mt-1 text-xs text-muted">
-                        {session.host} · {session.startedAt}–{session.endedAt} · {session.duration}
+                        {hostLabel(session)} · {session.startedAt}–{session.endedAt} ·{" "}
+                        {session.duration}
                       </p>
                     </div>
                   </div>
@@ -1159,7 +1177,11 @@ function AgentDashboard() {
                         </strong>
                         <span className="mt-1 block text-xs text-slate-400">
                           {activeLive
-                            ? `Transmitiendo con ${activeLive.tiktoker ?? "nadie asignado"}`
+                            ? `Transmitiendo con ${activeLive.tiktoker ?? "nadie asignado"}${
+                                activeLive.responsible_note
+                                  ? ` (${HOST_NOTES[activeLive.responsible_note]})`
+                                  : ""
+                              }`
                             : "Esperando que una cuenta salga en vivo"}
                         </span>
                       </span>
@@ -1618,7 +1640,8 @@ export function Dashboard() {
   if (!user || screens.length === 0) {
     return (
       <main className="grid min-h-screen place-items-center bg-canvas p-6 text-center text-sm text-muted">
-        Tu usuario aún no tiene una pantalla asignada. Pide al administrador que revise tu rol.
+        {user?.reason ?? "Tu usuario aún no tiene una pantalla asignada."} Pide a un administrador
+        que te asigne un rol en Clerk y vuelve a iniciar sesión.
       </main>
     );
   }

@@ -31,6 +31,11 @@ EXPORT = {'Authorization': 'Bearer export-secret'}
 API, MKT = '/api/social-live', '/api/marketing/tiktok'
 
 
+# What Clerk's Public metadata would say for each test person (boss = ADMIN_USER_IDS).
+CLERK_ROLES = {'ana': 'agente_ventas', 'bea': 'agente_ventas', 'sup': 'supervisor',
+               'mk': 'jefe_marketing', 'jefa': 'jefe_marketing'}
+
+
 def person(name):
     return {'Authorization': f'Bearer user:{name}'}
 
@@ -43,7 +48,8 @@ def people(monkeypatch):
     def fake_verify(token):
         if not token.startswith('user:'):
             raise HTTPException(401, 'Sesión inválida o vencida.')
-        return {'id': token.removeprefix('user:'), 'accounts': [], 'status': 'approved'}
+        uid = token.removeprefix('user:')
+        return {'id': uid, 'role': CLERK_ROLES.get(uid)}
 
     monkeypatch.setattr(clerk, 'verify_token', fake_verify)
 

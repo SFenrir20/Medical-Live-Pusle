@@ -14,6 +14,7 @@ from sqlalchemy.exc import IntegrityError
 
 from ...shared.config import settings
 from ..analytics.classify import interested_in, phones_in
+from . import titles
 from .models import (
     CapturedPhone,
     ContactAudit,
@@ -63,6 +64,32 @@ async def require_live(session, live_id: str) -> Live:
     return live
 
 
+async def code_map(session) -> dict[str, str]:
+    """{code: tiktoker id} of the active TikTokers that have a code."""
+    rows = (await session.execute(select(Tiktoker.code, Tiktoker.id).where(
+        Tiktoker.code.is_not(None), Tiktoker.active.is_(True)))).all()
+    return {code.upper(): tid for code, tid in rows}
+
+
+async def apply_title(session, live: Live, title) -> bool:
+    """Record the title and, when it names exactly one TikToker, make her the responsible.
+
+    A responsible set by hand is never overridden. A title without a (single) code never
+    clears one that an earlier title identified. Returns True if the responsible changed."""
+    title = titles.clean_title(title)
+    if title is None:
+        return False
+    live.title = title
+    if live.responsible_source == 'manual':
+        return False
+    found, _ = titles.resolve(title, await code_map(session))
+    if found is None or found == live.tiktoker_id:
+        return False
+    live.tiktoker_id, live.responsible_source = found, 'title'
+    live.updated_at = utcnow()
+    return True
+
+
 async def create_live(session, body) -> tuple[Live, bool]:
     now = utcnow()
     if body.live_id:
@@ -80,12 +107,34 @@ async def create_live(session, body) -> tuple[Live, bool]:
         raise HTTPException(422, 'Cuenta TikTok inexistente o inactiva.')
     live = Live(id=body.live_id or 'LIVE-' + uuid4().hex[:10].upper(),
                 tiktoker_id=body.tiktoker_id, account_id=body.account_id,
+                responsible_source='manual' if body.tiktoker_id else None,
                 started_at=body.started_at or now, status=body.status,
                 created_at=now, updated_at=now)
     session.add(live)
     session.add(LiveMetrics(live_id=live.id, created_at=now, updated_at=now))
     await session.flush()
+    await apply_title(session, live, body.title)
     return live, True
+
+
+async def update_live(session, live: Live, body) -> Live:
+    """Correct a live's title and/or responsible. A given tiktoker_id is a manual assignment;
+    an explicit null hands the decision back to the title."""
+    fields = body.model_fields_set
+    if 'tiktoker_id' in fields:
+        if body.tiktoker_id is None:
+            live.tiktoker_id, live.responsible_source = None, None
+        else:
+            tiktoker = await session.get(Tiktoker, body.tiktoker_id)
+            if tiktoker is None or not tiktoker.active:
+                raise HTTPException(422, 'TikToker inexistente o inactivo.')
+            live.tiktoker_id, live.responsible_source = body.tiktoker_id, 'manual'
+    if 'title' in fields:
+        live.title = titles.clean_title(body.title)
+    if live.responsible_source != 'manual' and live.title:
+        await apply_title(session, live, live.title)
+    live.updated_at = utcnow()
+    return live
 
 
 async def _claim_event(session, live_id, event_id) -> bool:

@@ -27,6 +27,29 @@ from ..modules.broadcasts.sink import EventSink, MemorySink  # noqa: E402
 from ..shared.config import settings  # noqa: E402
 
 
+def extract_title(info) -> str | None:
+    """Title from TikTok's room info (its shape varies), or None."""
+    if not isinstance(info, dict):
+        return None
+    room = info.get("room") if isinstance(info.get("room"), dict) else {}
+    for candidate in (info.get("title"), room.get("title")):
+        if isinstance(candidate, str) and candidate.strip():
+            return candidate
+    return None
+
+
+async def fetch_title(client) -> str | None:
+    """Never raises: room info can be blocked (age-restricted lives); then there is no title
+    and the live stays unassigned instead of the monitor failing."""
+    try:
+        return extract_title(await asyncio.wait_for(client.web.fetch_room_info(), timeout=10))
+    except Exception:  # noqa: BLE001 - optional enrichment
+        return None
+
+
+TITLE_REFRESH_S = 300
+
+
 def utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
@@ -198,7 +221,7 @@ class AccountMonitor:
                                     or getattr(e, "room_id", None))
             if self.store:
                 self.broadcast_id = await self.store.connected(
-                    self.account_id, self.tracker.room_id, utcnow())
+                    self.account_id, self.tracker.room_id, utcnow(), await fetch_title(client))
             self.connected.set()
             print(f"[+] {self.account_id} (@{self.username}): conectado", flush=True)
 
@@ -273,9 +296,14 @@ class AccountMonitor:
                     self.timeout_s, lambda c=client: asyncio.create_task(c.disconnect()))
             try:
                 if self.store:
-                    async def beat():
+                    async def beat(live_client=client):
+                        ticks = 0
                         while True:
                             await self.store.touch(self.account_id, utcnow())
+                            ticks += 1
+                            if ticks % max(1, TITLE_REFRESH_S // 20) == 0 and self.broadcast_id:
+                                await self.store.title_seen(
+                                    self.account_id, await fetch_title(live_client))
                             await asyncio.sleep(20)
                     # Heartbeat reports process activity, never a fabricated LIVE end.
                     heartbeat = asyncio.create_task(beat())
