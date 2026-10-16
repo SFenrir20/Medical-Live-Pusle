@@ -245,7 +245,9 @@ class AccountMonitor:
             })
 
         async def on_like(e):
-            await emit("like", e, extra={"count": getattr(e, "count", 1)})
+            # count = likes in this message; total = TikTok's running total for the room.
+            await emit("like", e, extra={"count": getattr(e, "count", 1),
+                                         "total": getattr(e, "total", None)})
 
         async def on_share(e):
             await emit("share", e)
@@ -257,7 +259,9 @@ class AccountMonitor:
             await emit("follow", e)
 
         async def on_audience(e):
-            await emit("audience", e, extra={"viewers": getattr(e, "total", None)})
+            # total = viewers right now; total_user = visitors accumulated so far.
+            await emit("audience", e, extra={"viewers": getattr(e, "total", None),
+                                             "visitors": getattr(e, "total_user", None)})
 
         async def on_live_end(e):
             self.tracker.on_live_end()

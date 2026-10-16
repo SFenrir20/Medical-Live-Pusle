@@ -129,6 +129,15 @@ class LiveMetrics(Base):
     peak_viewers = Column(Integer, nullable=False, server_default='0')
     viewer_samples = Column(Integer, nullable=False, server_default='0')
     viewer_sum = Column(BigInteger, nullable=False, server_default='0')
+    # Time-weighted audience: viewer-seconds / observed seconds (a sample counts for the time
+    # it lasted, capped so a monitor outage is not filled with the last value).
+    viewer_weighted_sum = Column(BigInteger, nullable=False, server_default='0')
+    viewer_observed_seconds = Column(Integer, nullable=False, server_default='0')
+    viewer_last_value = Column(Integer)
+    viewer_last_at = Column(DateTime(timezone=True))
+    # Running totals reported by TikTok (cross-check for likes and visitors).
+    likes_reported_total = Column(Integer, nullable=False, server_default='0')
+    visitors_reported_total = Column(Integer, nullable=False, server_default='0')
     comments_count = Column(Integer, nullable=False, server_default='0')
     likes_count = Column(Integer, nullable=False, server_default='0')
     shares_count = Column(Integer, nullable=False, server_default='0')

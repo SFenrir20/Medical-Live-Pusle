@@ -75,7 +75,8 @@ def to_event(raw: RawEvent) -> EventIn | None:
             return None
         return EventIn(event_type='comment', username=user, text=text[:2000], **common)
     if kind == 'like':
-        return EventIn(event_type='like', value=_count(payload.get('count'), 1), **common)
+        return EventIn(event_type='like', value=_count(payload.get('count'), 1),
+                       total=_count(payload.get('total'), 0) or None, **common)
     if kind == 'share':
         return EventIn(event_type='share', username=user, **common)
     if kind == 'follow':
@@ -85,7 +86,8 @@ def to_event(raw: RawEvent) -> EventIn | None:
     if kind == 'audience':
         if payload.get('viewers') is None:
             return None
-        return EventIn(event_type='viewer', value=_count(payload.get('viewers'), 0), **common)
+        return EventIn(event_type='viewer', value=_count(payload.get('viewers'), 0),
+                       total=_count(payload.get('visitors'), 0) or None, **common)
     if kind == 'gift':
         # Streaks report intermediate ticks; count only the final one (same rule as analytics).
         final = _count(payload.get('gift_type'), 0) != 1 or _count(payload.get('repeat_end'), 0) == 1

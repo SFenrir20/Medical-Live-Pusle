@@ -81,6 +81,9 @@ class EventIn(Stamped):
     username: str | None = Field(default=None, max_length=128)
     text: str | None = Field(default=None, max_length=2000)
     value: int = Field(default=1, ge=0, le=2_000_000_000)
+    # Running total reported by TikTok itself: likes of the room (on `like`) or visitors so
+    # far (on `viewer`). Dropped or batched events cannot lower it.
+    total: int | None = Field(default=None, ge=0, le=2_000_000_000)
     phone: str | None = Field(default=None, max_length=40)
     timestamp: datetime | None = None
     event_id: str | None = Field(default=None, min_length=1, max_length=128)

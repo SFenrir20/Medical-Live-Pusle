@@ -70,6 +70,7 @@ type LiveSession = {
     peak: number;
     average: number | null;
     uniqueViewers: number | null;
+    visitors: number | null;
   };
 };
 
@@ -122,6 +123,7 @@ function toLiveSession(live: LiveApi): LiveSession {
       peak: live.metrics.peak_viewers,
       average: live.metrics.average_viewers,
       uniqueViewers: live.metrics.unique_viewers,
+      visitors: live.metrics.visitors_reported_total || null,
     },
   };
 }
@@ -256,7 +258,13 @@ function LiveHistory({
               [
                 Eye,
                 session.metrics.views.toLocaleString("es-PE"),
-                "Visualizaciones",
+                "Ingresos observados",
+                "text-sky-600 bg-sky-50",
+              ],
+              [
+                Eye,
+                session.metrics.visitors?.toLocaleString("es-PE") ?? "No disponible",
+                "Visitantes acumulados (TikTok)",
                 "text-sky-600 bg-sky-50",
               ],
               [

@@ -71,16 +71,31 @@ def rate(count, seconds):
     return round(count / (max(seconds, 60.0) / 3600), 2) if seconds > 0 else 0.0
 
 
+def likes_of(m: LiveMetrics) -> int:
+    """Likes: the larger of what we summed and TikTok's own running total."""
+    return max(m.likes_count, m.likes_reported_total)
+
+
 def metrics_dict(m: LiveMetrics | None) -> dict:
     """Every figure either has a connected source or is explicitly unavailable (None)."""
     base = {f: 0 for f in METRIC_FIELDS}
-    base.update(leads_per_hour=0.0, peak_viewers=0, average_viewers=None, unique_viewers=None)
+    base.update(leads_per_hour=0.0, peak_viewers=0, average_viewers=None, unique_viewers=None,
+                likes_summed=0, likes_reported_total=0, visitors_reported_total=0)
     if m is not None:
         base.update({f: getattr(m, f) for f in METRIC_FIELDS})
+        # Average audience weighted by time; the plain mean of samples only as a fallback.
+        if m.viewer_observed_seconds:
+            average = m.viewer_weighted_sum / m.viewer_observed_seconds
+        else:
+            average = m.viewer_sum / m.viewer_samples if m.viewer_samples else None
         base.update(leads_per_hour=m.leads_per_hour, peak_viewers=m.peak_viewers,
-                    average_viewers=(round(m.viewer_sum / m.viewer_samples, 1)
-                                     if m.viewer_samples else None),
-                    unique_viewers=m.unique_viewers)
+                    average_viewers=round(average, 1) if average is not None else None,
+                    unique_viewers=m.unique_viewers,
+                    # Likes: TikTok's own running total cannot miss dropped/batched messages, so
+                    # the larger of it and our sum is the figure; both are exposed.
+                    likes_count=max(m.likes_count, m.likes_reported_total),
+                    likes_summed=m.likes_count, likes_reported_total=m.likes_reported_total,
+                    visitors_reported_total=m.visitors_reported_total)
     # What the sender reported is not evidence that private messages are being captured.
     base['direct_messages_reported'] = base.pop('direct_messages_count')
     base['direct_messages_capture'] = settings.dm_capture_connected
@@ -324,7 +339,7 @@ async def overview(session, tiktoker_id=None, **filters):
         if metrics:
             peak = max(peak, metrics.peak_viewers)
             for f in METRIC_FIELDS:
-                value = getattr(metrics, f)
+                value = likes_of(metrics) if f == 'likes_count' else getattr(metrics, f)
                 total[f] += value * (fraction if f in ALLOCATED else 1)
     contacts, _ = await scoped_contacts(session, date_from, date_to, tiktoker_id, account_id)
     phones = len(contacts)
@@ -419,7 +434,7 @@ async def accounts_performance(session, tiktoker_id=None, **filters):
         if metrics:
             r['views'] += metrics.views * fraction
             r['comments'] += metrics.comments_count * fraction
-            r['likes'] += metrics.likes_count * fraction
+            r['likes'] += likes_of(metrics) * fraction
             r['interested'] += metrics.interested_viewers * fraction
             r['donations'] += metrics.donations_count * fraction
     contacts, contact_attr = await scoped_contacts(

@@ -63,6 +63,11 @@ export type LiveApi = {
     /** What a sender reported; only meaningful when direct_messages_capture is true. */
     direct_messages_reported: number;
     direct_messages_capture: boolean;
+    /** Likes = the larger of our sum and TikTok's running total (both exposed). */
+    likes_summed: number;
+    likes_reported_total: number;
+    /** Visitors accumulated so far, as reported by TikTok (compare with Studio). */
+    visitors_reported_total: number;
     interested_viewers: number;
     /** Contacts whose FIRST capture was in this live. */
     phones_captured: number;

@@ -243,7 +243,7 @@ async def test_monitor_events_reach_the_new_reports(env):
     assert metrics['comments_count'] == 2 and metrics['likes_count'] == 12
     assert metrics['shares_count'] == 1 and metrics['views'] == 1
     assert metrics['new_followers'] == 1 and metrics['peak_viewers'] == 41
-    assert metrics['average_viewers'] == 37.0 and metrics['unique_viewers'] is None
+    assert metrics['average_viewers'] == 41.0 and metrics['unique_viewers'] is None  # 41 held 1 min
     assert metrics['donations_count'] == 3  # only the final tick of the streak
     assert metrics['interested_viewers'] == 1 and metrics['phones_captured'] == 1
     phones = (await client.get(f'{MKT}/lives/TT-7/phones', headers=READ)).json()['items']
