@@ -172,3 +172,15 @@ def test_legacy_v1_sections_follow_the_clerk_role_too():
         assert client.get('/v1/staff/users').status_code == 404
     finally:
         app.dependency_overrides.pop(get_current_user, None)
+
+
+async def test_sales_agents_cannot_reach_broadcast_history_or_exports(env):
+    """The history of broadcasts (metrics, exports) is for supervisor/marketing/manager only."""
+    client, _ = env
+    agent = person('ana', 'agente_ventas')
+    for path in (f'{MKT}/lives', f'{MKT}/lives/LIVE-1', f'{MKT}/lives/LIVE-1/metrics',
+                 f'{MKT}/lives/LIVE-1/comments', f'{MKT}/lives/LIVE-1/phones',
+                 f'{MKT}/lives/LIVE-1/comments/export', f'{MKT}/monitor', f'{MKT}/ranking'):
+        assert (await client.get(path, headers=agent)).status_code == 403, path
+    for name, role in (('sup', 'supervisor'), ('jefa', 'jefe_marketing'), ('gus', 'gerente')):
+        assert (await client.get(f'{MKT}/lives', headers=person(name, role))).status_code == 200
