@@ -11,8 +11,8 @@ from sqlalchemy.exc import IntegrityError
 
 from ...shared.db import get_session
 from . import contacts, queries, service
-from .export import build_xlsx
-from .models import CapturedPhone, PhoneRegistry, TiktokAccount, Tiktoker
+from .export import build_contacts_xlsx, build_xlsx
+from .models import CapturedPhone, ExportAudit, PhoneRegistry, TiktokAccount, Tiktoker
 from .schemas import (
     AccountIn,
     CommentIn,
@@ -264,6 +264,28 @@ async def live_phones(live_id: str, status: PhoneStatus | None = None,
                       session=Depends(get_session)):
     return await queries.live_phones(session, await _live(session, live_id), status,
                                      limit, offset)
+
+
+contact_exporter = require_scope('contacts:export')
+
+
+@marketing.get('/contacts/export')
+async def export_contacts(date_from: DateParam = None,
+                          date_to: DateParam = None,
+                          account_id: str | None = None,
+                          status: PhoneStatus | None = None,
+                          who=Depends(contact_exporter),
+                          session=Depends(get_session)):
+    """Contact list (one row per number, by first capture) for marketing's validation.
+    Each download is recorded: who, when and how many rows."""
+    start, end = period(date_from, date_to)
+    content, count = await build_contacts_xlsx(session, start, end, account_id, status)
+    session.add(ExportAudit(actor=who['user_id'], kind='contacts', rows=count))
+    await session.commit()
+    return Response(content=content, headers={
+        'Content-Disposition': 'attachment; filename="contactos.xlsx"',
+        'Cache-Control': 'no-store'},
+        media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
 
 
 @marketing.get('/lives/{live_id}/comments/export',

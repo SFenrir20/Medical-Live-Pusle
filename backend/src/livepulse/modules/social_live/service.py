@@ -13,7 +13,7 @@ from sqlalchemy import case, func, select, update
 from sqlalchemy.exc import IntegrityError
 
 from ...shared.config import settings
-from ..analytics.classify import interested_in, phones_in
+from ..analytics.classify import complains_not_contacted, interested_in, phones_in
 from . import titles
 from .models import (
     CapturedPhone,
@@ -283,6 +283,8 @@ async def ingest(session, live: Live, event: EventIn, *, strict_age: bool = True
     if not await _claim_event(session, live.id, event.event_id):
         return {'accepted': False, 'duplicate': True, 'event_type': event.event_type}
 
+    from .alerts import check_reappearance  # alerts imports this module
+
     kind, new_phones, affected = event.event_type, 0, {live.id}
     if kind == 'comment':
         text = (event.text or '').strip()
@@ -294,7 +296,8 @@ async def ingest(session, live: Live, event: EventIn, *, strict_age: bool = True
         if store_detail:
             session.add(LiveComment(live_id=live.id, username=event.username, comment=text,
                                     phone_detected=found[0] if found else None,
-                                    interested=interested, created_at=at))
+                                    interested=interested,
+                                    complaint=complains_not_contacted(text), created_at=at))
         await _bump(session, live.id, 'comments_count', 1)
         if first_interest:
             await _bump(session, live.id, 'interested_viewers', 1)
@@ -303,6 +306,7 @@ async def ingest(session, live: Live, event: EventIn, *, strict_age: bool = True
                                                 'comment', at)
             new_phones += outcome == 'new'
             affected |= touched
+            await check_reappearance(session, live, phone, at, outcome)
     elif kind in COUNTER:
         await _bump(session, live.id, COUNTER[kind], event.value)
     elif kind == 'viewer':
@@ -329,6 +333,7 @@ async def ingest(session, live: Live, event: EventIn, *, strict_age: bool = True
                                             SOURCE_BY_EVENT[kind], at)
         new_phones += outcome == 'new'
         affected |= touched
+        await check_reappearance(session, live, phone, at, outcome)
     await refresh_many(session, live, affected)
     return {'accepted': True, 'duplicate': False, 'event_type': kind, 'phones_new': new_phones}
 

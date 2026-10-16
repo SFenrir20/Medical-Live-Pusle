@@ -32,11 +32,21 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { downloadLiveComments, LiveApi } from "@/features/workspace/api";
+import { AlertsPanel } from "@/features/notifications/AlertsPanel";
+import { NotificationBell } from "@/features/notifications/NotificationBell";
 import { useBoard } from "@/features/workspace/useBoard";
 import { MessageStatus, SocialMessage, useWorkspace } from "@/features/workspace/useWorkspace";
 
 type View = "Pulso" | "Bandeja" | "Contactos" | "Ajustes";
-type MarketingView = "Resumen" | "Equipo" | "Transmisiones";
+type MarketingView = "Resumen" | "Equipo" | "Transmisiones" | "Alertas";
+
+const ROLE_LABEL: Record<string, string> = {
+  agente_ventas: "Agente call center",
+  gerente: "Gerente",
+  jefe_marketing: "Jefe de Marketing",
+  supervisor: "Supervisor",
+  admin: "Administrador",
+};
 type LiveSession = {
   id: string;
   account: string;
@@ -177,9 +187,165 @@ function StatusBadge({ status }: { status: MessageStatus }) {
   );
 }
 
-function MarketingDashboard() {
+/** Results of every broadcast. Only the supervisor/marketing/manager views render it. */
+function LiveHistory({
+  sessions,
+  canExport,
+  onExport,
+  error,
+}: {
+  sessions: LiveSession[];
+  canExport: boolean;
+  onExport: (session: LiveSession) => void;
+  error: string;
+}) {
+  return (
+    <section className="mt-8">
+      <div>
+        <p className="text-xs font-bold uppercase tracking-[0.14em] text-primary">
+          Historial de transmisiones
+        </p>
+        <h2 className="mt-2 text-xl font-bold tracking-tight">Resultados de cada LIVE</h2>
+        <p className="mt-1 text-sm text-muted">
+          Al finalizar una transmisión, sus comentarios se archivan y el resumen queda disponible.
+        </p>
+      </div>
+
+      {error && (
+        <p
+          role="alert"
+          className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+        >
+          {error}
+        </p>
+      )}
+
+      {!sessions.length ? (
+        <div className="mt-5 flex flex-col items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-white px-5 py-12 text-center">
+          <span className="grid size-11 place-items-center rounded-2xl bg-slate-100 text-slate-400">
+            <Activity size={20} />
+          </span>
+          <strong className="mt-4 text-sm">Todavía no hay transmisiones finalizadas</strong>
+          <p className="mt-1 max-w-md text-xs leading-5 text-muted">
+            Cuando la plataforma detecte que un LIVE terminó, su reporte aparecerá aquí
+            automáticamente.
+          </p>
+        </div>
+      ) : (
+        <div className="mt-5 space-y-5">
+          {sessions.map((session) => {
+            const metrics = [
+              [
+                Phone,
+                session.metrics.loosePhones,
+                "Teléfonos sueltos",
+                "text-amber-600 bg-amber-50",
+              ],
+              [
+                MessageCircle,
+                session.metrics.directMessages ?? "No disponible",
+                "Mensajes directos",
+                "text-primary bg-primary-soft",
+              ],
+              [
+                Heart,
+                session.metrics.likes.toLocaleString("es-PE"),
+                "Me gusta (tap tap)",
+                "text-red-500 bg-red-50",
+              ],
+              [
+                Eye,
+                session.metrics.views.toLocaleString("es-PE"),
+                "Visualizaciones",
+                "text-sky-600 bg-sky-50",
+              ],
+              [
+                Sparkles,
+                session.metrics.interestedViewers,
+                "Espectadores interesados",
+                "text-violet-600 bg-violet-50",
+              ],
+              [
+                UserPlus,
+                session.metrics.newFollowers,
+                "Seguidores nuevos",
+                "text-emerald-600 bg-emerald-50",
+              ],
+              [Gift, session.metrics.donors, "Donadores", "text-pink-600 bg-pink-50"],
+              [Share2, session.metrics.shares, "Compartidos", "text-cyan-600 bg-cyan-50"],
+              [TrendingUp, session.metrics.peak, "Pico simultáneo", "text-orange-600 bg-orange-50"],
+              [
+                Gauge,
+                session.metrics.average ?? "No disponible",
+                "Promedio simultáneo",
+                "text-slate-600 bg-slate-100",
+              ],
+              [
+                Eye,
+                session.metrics.uniqueViewers ?? "No disponible",
+                "Espectadores únicos",
+                "text-sky-600 bg-sky-50",
+              ],
+            ] as const;
+            return (
+              <article
+                key={session.id}
+                className="overflow-hidden rounded-2xl border border-line bg-white shadow-sm"
+              >
+                <div className="flex flex-col gap-4 border-b border-line p-5 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex items-center gap-3">
+                    <span className="grid size-11 place-items-center rounded-xl bg-slate-100 text-slate-600">
+                      <Music2 size={20} />
+                    </span>
+                    <div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <strong className="text-sm">{session.account}</strong>
+                        <span className="rounded-full bg-slate-100 px-2 py-1 text-[10px] font-bold uppercase text-slate-500">
+                          Finalizado
+                        </span>
+                      </div>
+                      <p className="mt-1 text-xs text-muted">
+                        {hostLabel(session)} · {session.startedAt}–{session.endedAt} ·{" "}
+                        {session.duration}
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={!canExport}
+                    title={canExport ? undefined : "Tu rol no permite descargar comentarios"}
+                    onClick={() => void onExport(session)}
+                    className="inline-flex w-fit items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-xs font-bold text-white hover:bg-emerald-700"
+                  >
+                    <FileSpreadsheet size={16} /> Descargar reporte
+                  </button>
+                </div>
+                <div className="grid grid-cols-2 gap-px bg-line sm:grid-cols-3 lg:grid-cols-5">
+                  {metrics.map(([Icon, value, label, color]) => {
+                    const MetricIcon = Icon as typeof Phone;
+                    return (
+                      <div key={label} className="bg-white p-4">
+                        <span className={`grid size-8 place-items-center rounded-lg ${color}`}>
+                          <MetricIcon size={16} />
+                        </span>
+                        <strong className="mt-3 block text-xl">{value}</strong>
+                        <span className="mt-1 block text-[11px] leading-4 text-muted">{label}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function MarketingDashboard({ initialView = "Resumen" }: { initialView?: MarketingView }) {
   const { user, logout } = useAuth();
-  const [view, setView] = useState<MarketingView>("Resumen");
+  const [view, setView] = useState<MarketingView>(initialView);
   const { summary, lives, error: boardError } = useBoard(true);
   const now = useNow();
   const unassigned = { length: summary?.unassigned ?? 0 };
@@ -187,6 +353,16 @@ function MarketingDashboard() {
   const statsOf = (name: string) => summary?.agents.find((agent) => agent.name === name);
   const activeLives = lives.filter((live) => live.status === "live");
   const finishedSessions = lives.filter((live) => live.status === "finished").map(toLiveSession);
+  const canExport = (user?.permissions ?? []).includes("export");
+  const [exportError, setExportError] = useState("");
+  const exportLive = async (session: LiveSession) => {
+    setExportError("");
+    try {
+      await downloadLiveComments(session.id);
+    } catch (error) {
+      setExportError(error instanceof Error ? error.message : "No se pudo descargar el archivo.");
+    }
+  };
 
   return (
     <div className="min-h-screen bg-canvas text-ink">
@@ -194,7 +370,7 @@ function MarketingDashboard() {
         <div className="mx-auto flex h-[68px] max-w-[1400px] items-center justify-between px-4 sm:px-6">
           <Logo />
           <nav className="hidden items-center gap-1 lg:flex">
-            {(["Resumen", "Equipo", "Transmisiones"] as MarketingView[]).map((item) => (
+            {(["Resumen", "Equipo", "Transmisiones", "Alertas"] as MarketingView[]).map((item) => (
               <button
                 type="button"
                 key={item}
@@ -208,8 +384,9 @@ function MarketingDashboard() {
             ))}
           </nav>
           <div className="flex items-center gap-2">
+            <NotificationBell onOpenAlerts={() => setView("Alertas")} />
             <span className="hidden rounded-full bg-violet-50 px-3 py-1.5 text-[11px] font-bold text-violet-700 sm:inline-flex">
-              Jefe de Marketing
+              {ROLE_LABEL[user?.role ?? ""] ?? "Marketing"}
             </span>
             <button
               type="button"
@@ -221,7 +398,9 @@ function MarketingDashboard() {
               </span>
               <span className="hidden text-left sm:block">
                 <span className="block text-sm font-semibold">{user?.name}</span>
-                <span className="block text-[11px] text-muted">Jefe de Marketing</span>
+                <span className="block text-[11px] text-muted">
+                  {ROLE_LABEL[user?.role ?? ""] ?? "Marketing"}
+                </span>
               </span>
               <LogOut size={16} className="text-muted" />
             </button>
@@ -258,7 +437,7 @@ function MarketingDashboard() {
         )}
 
         <div className="mt-6 flex gap-2 overflow-x-auto lg:hidden">
-          {(["Resumen", "Equipo", "Transmisiones"] as MarketingView[]).map((item) => (
+          {(["Resumen", "Equipo", "Transmisiones", "Alertas"] as MarketingView[]).map((item) => (
             <button
               type="button"
               key={item}
@@ -410,6 +589,8 @@ function MarketingDashboard() {
           </section>
         )}
 
+        {view === "Alertas" && <AlertsPanel />}
+
         {view === "Transmisiones" && (
           <section className="mt-6">
             <div>
@@ -450,34 +631,21 @@ function MarketingDashboard() {
                   Todavía no hay transmisiones registradas.
                 </p>
               )}
-              {finishedSessions.map((session) => (
-                <article
-                  key={session.id}
-                  className="flex flex-col gap-4 rounded-2xl border border-line bg-white p-5 sm:flex-row sm:items-center"
-                >
-                  <span className="grid size-11 place-items-center rounded-xl bg-slate-100 text-slate-600">
-                    <Music2 size={20} />
-                  </span>
-                  <div className="flex-1">
-                    <strong className="text-sm">{session.account}</strong>
-                    <p className="mt-1 text-xs text-muted">
-                      {hostLabel(session)} · {session.duration} · finalizado
-                    </p>
-                  </div>
-                  <span className="rounded-full bg-violet-50 px-3 py-1.5 text-xs font-semibold text-violet-700">
-                    Ver métricas en Medical 360
-                  </span>
-                </article>
-              ))}
             </div>
+            <LiveHistory
+              sessions={finishedSessions}
+              canExport={canExport}
+              onExport={(session) => void exportLive(session)}
+              error={exportError}
+            />
           </section>
         )}
       </main>
 
       <nav className="sticky bottom-0 z-30 border-t border-line bg-white px-3 py-2 lg:hidden">
         <div className="mx-auto flex max-w-sm justify-around">
-          {(["Resumen", "Equipo", "Transmisiones"] as MarketingView[]).map((item, index) => {
-            const Icon = index === 0 ? Activity : index === 1 ? Users : Music2;
+          {(["Resumen", "Equipo", "Transmisiones", "Alertas"] as MarketingView[]).map((item, index) => {
+            const Icon = index === 0 ? Activity : index === 1 ? Users : index === 2 ? Music2 : Bell;
             return (
               <button
                 type="button"
@@ -498,26 +666,20 @@ function MarketingDashboard() {
   );
 }
 
-function AgentDashboard() {
+function AgentDashboard({ onOpenMarketing }: { onOpenMarketing?: () => void }) {
   const { user, logout } = useAuth();
   const [view, setView] = useState<View>("Pulso");
   const [phoneOnly, setPhoneOnly] = useState(true);
   const workspace = useWorkspace(true, phoneOnly);
   const { messages, loading: inboxLoading, error: inboxError } = workspace;
-  const [exportError, setExportError] = useState("");
   const [copiedPhoneId, setCopiedPhoneId] = useState<number | null>(null);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [page, setPage] = useState(1);
-  const [notificationsOpen, setNotificationsOpen] = useState(false);
   const permissions = user?.permissions ?? [];
   const canHistory = permissions.includes("read");
-  const canExport = permissions.includes("export");
   const board = useBoard(canHistory);
   const now = useNow();
   const activeLive = board.lives.find((live) => live.status === "live");
-  const liveSessions: LiveSession[] = board.lives
-    .filter((live) => live.status === "finished")
-    .map(toLiveSession);
   const [settings, setSettings] = useState({
     tiktok: true,
     instagram: true,
@@ -566,15 +728,6 @@ function AgentDashboard() {
     await navigator.clipboard.writeText(phone.replaceAll(" ", ""));
     setCopiedPhoneId(id);
     window.setTimeout(() => setCopiedPhoneId(null), 1800);
-  };
-
-  const exportLiveSession = async (session: LiveSession) => {
-    setExportError("");
-    try {
-      await downloadLiveComments(session.id);
-    } catch (error) {
-      setExportError(error instanceof Error ? error.message : "No se pudo descargar el archivo.");
-    }
   };
 
   const kanban = (
@@ -906,140 +1059,6 @@ function AgentDashboard() {
     </section>
   );
 
-  const liveHistory = (
-    <section className="mt-8">
-      <div>
-        <p className="text-xs font-bold uppercase tracking-[0.14em] text-primary">
-          Historial de transmisiones
-        </p>
-        <h2 className="mt-2 text-xl font-bold tracking-tight">Resultados de cada LIVE</h2>
-        <p className="mt-1 text-sm text-muted">
-          Al finalizar una transmisión, sus comentarios se archivan y el resumen queda disponible.
-        </p>
-      </div>
-
-      {!liveSessions.length ? (
-        <div className="mt-5 flex flex-col items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-white px-5 py-12 text-center">
-          <span className="grid size-11 place-items-center rounded-2xl bg-slate-100 text-slate-400">
-            <Activity size={20} />
-          </span>
-          <strong className="mt-4 text-sm">Todavía no hay transmisiones finalizadas</strong>
-          <p className="mt-1 max-w-md text-xs leading-5 text-muted">
-            Cuando la plataforma detecte que un LIVE terminó, su reporte aparecerá aquí
-            automáticamente.
-          </p>
-        </div>
-      ) : (
-        <div className="mt-5 space-y-5">
-          {liveSessions.map((session) => {
-            const metrics = [
-              [
-                Phone,
-                session.metrics.loosePhones,
-                "Teléfonos sueltos",
-                "text-amber-600 bg-amber-50",
-              ],
-              [
-                MessageCircle,
-                session.metrics.directMessages ?? "No disponible",
-                "Mensajes directos",
-                "text-primary bg-primary-soft",
-              ],
-              [
-                Heart,
-                session.metrics.likes.toLocaleString("es-PE"),
-                "Me gusta (tap tap)",
-                "text-red-500 bg-red-50",
-              ],
-              [
-                Eye,
-                session.metrics.views.toLocaleString("es-PE"),
-                "Visualizaciones",
-                "text-sky-600 bg-sky-50",
-              ],
-              [
-                Sparkles,
-                session.metrics.interestedViewers,
-                "Espectadores interesados",
-                "text-violet-600 bg-violet-50",
-              ],
-              [
-                UserPlus,
-                session.metrics.newFollowers,
-                "Seguidores nuevos",
-                "text-emerald-600 bg-emerald-50",
-              ],
-              [Gift, session.metrics.donors, "Donadores", "text-pink-600 bg-pink-50"],
-              [Share2, session.metrics.shares, "Compartidos", "text-cyan-600 bg-cyan-50"],
-              [TrendingUp, session.metrics.peak, "Pico simultáneo", "text-orange-600 bg-orange-50"],
-              [
-                Gauge,
-                session.metrics.average ?? "No disponible",
-                "Promedio simultáneo",
-                "text-slate-600 bg-slate-100",
-              ],
-              [
-                Eye,
-                session.metrics.uniqueViewers ?? "No disponible",
-                "Espectadores únicos",
-                "text-sky-600 bg-sky-50",
-              ],
-            ] as const;
-            return (
-              <article
-                key={session.id}
-                className="overflow-hidden rounded-2xl border border-line bg-white shadow-sm"
-              >
-                <div className="flex flex-col gap-4 border-b border-line p-5 sm:flex-row sm:items-center sm:justify-between">
-                  <div className="flex items-center gap-3">
-                    <span className="grid size-11 place-items-center rounded-xl bg-slate-100 text-slate-600">
-                      <Music2 size={20} />
-                    </span>
-                    <div>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <strong className="text-sm">{session.account}</strong>
-                        <span className="rounded-full bg-slate-100 px-2 py-1 text-[10px] font-bold uppercase text-slate-500">
-                          Finalizado
-                        </span>
-                      </div>
-                      <p className="mt-1 text-xs text-muted">
-                        {hostLabel(session)} · {session.startedAt}–{session.endedAt} ·{" "}
-                        {session.duration}
-                      </p>
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    disabled={!canExport}
-                    title={canExport ? undefined : "Tu rol no permite descargar comentarios"}
-                    onClick={() => void exportLiveSession(session)}
-                    className="inline-flex w-fit items-center gap-2 rounded-xl bg-emerald-600 px-4 py-2.5 text-xs font-bold text-white hover:bg-emerald-700"
-                  >
-                    <FileSpreadsheet size={16} /> Descargar reporte
-                  </button>
-                </div>
-                <div className="grid grid-cols-2 gap-px bg-line sm:grid-cols-3 lg:grid-cols-5">
-                  {metrics.map(([Icon, value, label, color]) => {
-                    const MetricIcon = Icon as typeof Phone;
-                    return (
-                      <div key={label} className="bg-white p-4">
-                        <span className={`grid size-8 place-items-center rounded-lg ${color}`}>
-                          <MetricIcon size={16} />
-                        </span>
-                        <strong className="mt-3 block text-xl">{value}</strong>
-                        <span className="mt-1 block text-[11px] leading-4 text-muted">{label}</span>
-                      </div>
-                    );
-                  })}
-                </div>
-              </article>
-            );
-          })}
-        </div>
-      )}
-    </section>
-  );
-
   return (
     <div className="min-h-screen bg-canvas text-ink">
       <header className="sticky top-0 z-30 border-b border-line bg-white/95 backdrop-blur">
@@ -1062,41 +1081,7 @@ function AgentDashboard() {
             ))}
           </nav>
           <div className="relative flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setNotificationsOpen((open) => !open)}
-              className="relative rounded-xl p-2.5 text-muted hover:bg-slate-100"
-              aria-label="Notificaciones"
-            >
-              <Bell size={20} />
-              <span className="absolute right-2 top-2 size-2 rounded-full border-2 border-white bg-red-500" />
-            </button>
-            {notificationsOpen && (
-              <div className="absolute right-0 top-12 z-40 w-80 rounded-2xl border border-line bg-white p-3 shadow-xl">
-                <div className="flex items-center justify-between px-2 py-2">
-                  <strong className="text-sm">Notificaciones</strong>
-                  <button type="button" onClick={() => setNotificationsOpen(false)}>
-                    <X size={16} className="text-muted" />
-                  </button>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    showPriority();
-                    setNotificationsOpen(false);
-                  }}
-                  className="flex w-full gap-3 rounded-xl p-3 text-left hover:bg-amber-50"
-                >
-                  <BellRing size={18} className="mt-0.5 text-amber-600" />
-                  <span>
-                    <strong className="block text-xs">5 contactos requieren atención</strong>
-                    <span className="mt-1 block text-[11px] text-muted">
-                      Revisa la bandeja prioritaria.
-                    </span>
-                  </span>
-                </button>
-              </div>
-            )}
+            <NotificationBell onOpenInbox={showPriority} onOpenAlerts={onOpenMarketing} />
             <button
               type="button"
               onClick={logout}
@@ -1108,7 +1093,9 @@ function AgentDashboard() {
               </span>
               <span className="hidden text-left sm:block">
                 <span className="block text-sm font-semibold">{user?.name}</span>
-                <span className="block text-[11px] text-muted">Agente call center</span>
+                <span className="block text-[11px] text-muted">
+                  {ROLE_LABEL[user?.role ?? ""] ?? "Agente call center"}
+                </span>
               </span>
               <LogOut size={16} className="text-muted" />
             </button>
@@ -1140,12 +1127,12 @@ function AgentDashboard() {
               </div>
             </div>
 
-            {(inboxError || exportError) && (
+            {inboxError && (
               <p
                 role="alert"
                 className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
               >
-                {inboxError || exportError}
+                {inboxError}
               </p>
             )}
             {inboxLoading && <p className="mt-4 text-sm text-muted">Cargando tu bandeja…</p>}
@@ -1306,7 +1293,6 @@ function AgentDashboard() {
                     })}
                   </div>
                 </section>
-                {canHistory && liveHistory}
                 {kanban}
               </>
             )}
@@ -1633,6 +1619,7 @@ function AgentDashboard() {
 export function Dashboard() {
   const { user } = useAuth();
   const screens = user?.screens ?? [];
+  const [marketingStart, setMarketingStart] = useState<MarketingView>("Resumen");
   const [current, setCurrent] = useState<"agent" | "marketing">(
     screens.includes("marketing") && !screens.includes("agent") ? "marketing" : "agent",
   );
@@ -1664,7 +1651,16 @@ export function Dashboard() {
           </button>
         ))}
       </div>
-      {current === "marketing" ? <MarketingDashboard /> : <AgentDashboard />}
+      {current === "marketing" ? (
+        <MarketingDashboard key={marketingStart} initialView={marketingStart} />
+      ) : (
+        <AgentDashboard
+          onOpenMarketing={() => {
+            setMarketingStart("Alertas");
+            setCurrent("marketing");
+          }}
+        />
+      )}
     </>
   );
 }

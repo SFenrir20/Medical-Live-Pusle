@@ -15,7 +15,8 @@ TABLES = [m.TiktokAccount.__table__, m.Tiktoker.__table__, m.Live.__table__,
           m.LiveComment.__table__, m.LiveEventKey.__table__, m.LiveInterestedUser.__table__, m.LiveMetrics.__table__,
           m.CapturedPhone.__table__, m.PhoneRegistry.__table__,
           UserRole.__table__, Broadcast.__table__, RawEvent.__table__,
-          m.ContactAudit.__table__, MonitorState.__table__]
+          m.ContactAudit.__table__, m.ContactAlert.__table__, m.ExportAudit.__table__,
+          MonitorState.__table__]
 
 
 @pytest.fixture

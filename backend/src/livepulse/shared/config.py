@@ -18,6 +18,12 @@ class Settings(BaseSettings):
     medical360_token: str = ""           # Medical 360: read statistics
     medical360_export_token: str = ""    # Medical 360: also export detailed comments
     comments_retention_days: int = 30
+    # A contact marked as contacted who sends the number AGAIN in the same live is only
+    # suspicious after this many minutes (before that it is just the message in flight).
+    alert_same_live_minutes: int = 10
+    # Reminders for sales agents about chats still pending.
+    reminder_first_minutes: int = 10
+    reminder_second_minutes: int = 20
     # Private messages are not captured by any integration. Flip only when one exists.
     dm_capture_connected: bool = False
     cors_origins: list[str] = []

@@ -112,6 +112,45 @@ Agregar o cambiar una TikToker: `POST /api/social-live/tiktokers`
 `{"id": "TK-X07", "name": "Xi", "full_name": "Ximena", "code": "X7"}` (el código es una letra y
 uno o dos dígitos y debe ser único; `409` si ya existe).
 
+## Alertas, recordatorios y descarga de contactos
+
+La **campana** de Social Pulse muestra a cada rol solo lo suyo (lo decide el servidor):
+
+| Rol | Qué recibe en la campana |
+|---|---|
+| `agente_ventas` | Recordatorios de **sus** chats pendientes: «tienes N chats que llevan más de 10 min (M más de 20)» y contactos sin tomar. **Nunca** ve alertas |
+| `supervisor`, `jefe_marketing`, `gerente` | Alertas de números que reaparecen y comentarios «no me contactan» por revisar |
+
+**Cuándo se genera una alerta** (`modules/social_live/alerts.py`, al ingresar cada comentario con
+número, según el estado del contacto en ese momento):
+
+- Contacto aún **nuevo** que vuelve a escribir su número: **sin alerta** (solo insiste).
+- Contacto ya **marcado como contactado**:
+  - mismo LIVE, y pasaron **`ALERT_SAME_LIVE_MINUTES` (10)** desde que se marcó → `same_live`;
+    antes de ese plazo, o si escribió antes de que lo marcaran, no hay alerta;
+  - otro LIVE de la misma cuenta, después de marcado → `other_live`;
+  - LIVE de otra cuenta, después de marcado → `other_account`.
+- Una alerta por (contacto, LIVE); si sigue escribiendo suma `repeats`. Una alerta revisada o
+  descartada no se reabre.
+
+Una alerta es **un motivo para revisar, no una prueba**. Se resuelve con `Marcar revisada` o
+`Falsa alarma` y una nota; queda quién y cuándo.
+
+**Comentarios «no me contactan»**: reglas de texto (`no me contactan`, `nadie me llamó`, `les
+escribo y no me contestan`, `sigo esperando`…) marcan el comentario. La lista muestra, junto al
+usuario, los números que dejó con ese mismo nombre de TikTok, su estado y el asesor. Los
+comentarios se conservan 30 días.
+
+Rutas (`/api`): `GET /notifications`, `GET /alerts?status=`, `PATCH /alerts/{id}`,
+`GET /complaints?status=`, `PATCH /complaints/{id}`, y
+`GET /marketing/tiktok/contacts/export` (Excel con una fila por contacto: estado, asesor,
+primera captura, LIVE, responsable, primer contacto, minutos hasta el contacto, apariciones y
+alertas abiertas). Permisos: `alerts:read`, `alerts:review`, `contacts:export` (supervisor,
+jefe de marketing, gerente y admin). Cada descarga queda en `export_audit`. Gerente y jefe de
+marketing ven teléfonos completos **solo** en estas alertas y en esa descarga.
+
+Variables: `ALERT_SAME_LIVE_MINUTES`, `REMINDER_FIRST_MINUTES`, `REMINDER_SECOND_MINUTES`.
+
 ## Ingestión — `/api/social-live` (token `ingest`)
 
 `POST /accounts`, `POST /tiktokers`, `POST /lives`, `POST /lives/{id}/events` (uno o
@@ -211,7 +250,7 @@ las transmisiones, marca como publicados los eventos ya plegados y mueve el anti
    origen de Social Pulse), `VITE_CLERK_PUBLISHABLE_KEY`, `WEB_PORT`, `CORS_ORIGINS` si aplica.
 3. Reconstruir y desplegar `api`, `worker`, `monitor` y `social` (no basta reiniciar). La API
    aplica `alembic upgrade head` al iniciar.
-4. `python -m alembic current` debe mostrar `0008 (head)` (carga a las 6 TikTokers).
+4. `python -m alembic current` debe mostrar `0009 (head)` (carga a las 6 TikTokers y crea las tablas de alertas).
 5. Esperar el primer ciclo del worker (convierte el historial) y revisar logs. Los LIVE que ya
    estaban al aire reciben su título en ≤5 min tras reiniciar `monitor`; los LIVE anteriores
    (sin título guardado) siguen «Sin asignar» hasta asignarlos con `PATCH` si hace falta.
