@@ -3,6 +3,7 @@ import { SignIn } from "@clerk/react";
 import { Activity, LogOut, ShieldAlert, Sparkles } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { Dashboard } from "@/features/dashboard/Dashboard";
+import { TikTokConnection } from "@/features/integrations/TikTokConnection";
 
 function Logo({ compact = false }: { compact?: boolean }) {
   return (
@@ -141,5 +142,6 @@ export default function App() {
     return <AccessProblem message={error} onRetry={() => void reload()} onLogout={() => void logout()} />;
   }
 
-  return isAuthenticated ? <Dashboard /> : <LoginScreen />;
+  if (!isAuthenticated) return <LoginScreen />;
+  return window.location.pathname === "/integraciones/tiktok" ? <TikTokConnection /> : <Dashboard />;
 }

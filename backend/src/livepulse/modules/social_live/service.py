@@ -309,8 +309,12 @@ async def ingest(session, live: Live, event: EventIn, *, strict_age: bool = True
     if not await _claim_event(session, live.id, event.event_id):
         return {'accepted': False, 'duplicate': True, 'event_type': event.event_type}
 
-    from .alerts import check_reappearance  # alerts imports this module
+    from . import audience  # audience and alerts import this module
+    from .alerts import check_reappearance
 
+    if event.username:  # fan ranking: who did what in this live
+        await audience.record(session, live.id, event.username, event.display_name, at,
+                              audience.contribution(event))
     kind, new_phones, affected = event.event_type, 0, {live.id}
     if kind == 'comment':
         text = (event.text or '').strip()

@@ -250,6 +250,34 @@ class ContactAlert(Base):
     )
 
 
+class AudienceMember(Base):
+    """What one TikTok user did in one live (comments, likes, gifts...), for the managers'
+    ranking of fans. Temporary like the comments: purged after COMMENTS_RETENTION_DAYS.
+    first/last_seen_at are the first and last time the user showed up in an event; TikTok does
+    not report who leaves, so their distance is an estimate of the time watching."""
+    __tablename__ = 'audience_members'
+    id = Column(PK_BIG, primary_key=True, autoincrement=True)
+    live_id = Column(String(40), ForeignKey('lives.id'), nullable=False)
+    user_key = Column(String(128), nullable=False)      # lower-case TikTok id, without '@'
+    username = Column(String(128), nullable=False)
+    display_name = Column(String(128))
+    first_seen_at = Column(DateTime(timezone=True), nullable=False)
+    last_seen_at = Column(DateTime(timezone=True), nullable=False)
+    comments = Column(Integer, nullable=False, server_default='0')
+    likes = Column(Integer, nullable=False, server_default='0')
+    shares = Column(Integer, nullable=False, server_default='0')
+    gifts = Column(Integer, nullable=False, server_default='0')
+    diamonds = Column(BigInteger, nullable=False, server_default='0')
+    follows = Column(Integer, nullable=False, server_default='0')
+    joins = Column(Integer, nullable=False, server_default='0')
+
+    __table_args__ = (
+        UniqueConstraint('live_id', 'user_key', name='uq_audience_live_user'),
+        Index('ix_audience_user', 'user_key'),
+        Index('ix_audience_last_seen', 'last_seen_at'),
+    )
+
+
 class ExportAudit(Base):
     """Who downloaded contact data, and how much."""
     __tablename__ = 'export_audit'

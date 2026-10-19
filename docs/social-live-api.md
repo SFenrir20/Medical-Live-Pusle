@@ -174,6 +174,27 @@ marketing ven teléfonos completos **solo** en estas alertas y en esa descarga.
 
 Variables: `ALERT_SAME_LIVE_MINUTES`, `REMINDER_FIRST_MINUTES`, `REMINDER_SECOND_MINUTES`.
 
+## Audiencia destacada (ranking de fans)
+
+Pestaña «Audiencia» de la vista de marketing: quiénes comentan, regalan o se quedan más.
+Permiso `audience:read` (supervisor, jefe de marketing, gerente y admin; **nunca** agentes ni los
+tokens de servicio). `GET /api/audience/top?live_id=&days=&sort=&limit=`: con `live_id` es ese
+live; sin él, el acumulado de los últimos `days` (máx. 90) de todos los lives, donde `lives > 1`
+son fans recurrentes. `sort`: `diamonds` (por defecto), `comments`, `likes`, `shares`,
+`presence`, `lives`; los empates se resuelven por diamantes, comentarios y likes.
+
+| Dato | Fuente | Fiabilidad |
+|---|---|---|
+| comentarios, likes, compartidos, regalos y diamantes | eventos del monitor, por persona | exacto (los tramos intermedios de una racha de regalos no cuentan) |
+| siguió | evento de follow | exacto |
+| tiempo visible | de la primera a la última vez que la persona aparece en un evento | **estimación**: TikTok no avisa quién sale y quien mira en silencio no genera eventos |
+| dejó contacto | su usuario figura en `captured_phones` | solo un sí/no: **el teléfono no se devuelve** |
+
+Se guarda en `audience_members` (una fila por live y usuario; el usuario se normaliza a
+minúsculas y sin `@`). Se alimenta en la misma ingestión que las métricas, así que cada evento
+cuenta una vez, y se borra con los comentarios (`COMMENTS_RETENTION_DAYS`). La migración `0011`
+reconstruye el historial desde `raw_events` para los lives ya ocurridos dentro de esa ventana.
+
 ## Ingestión — `/api/social-live` (token `ingest`)
 
 `POST /accounts`, `POST /tiktokers`, `POST /lives`, `POST /lives/{id}/events` (uno o
@@ -213,8 +234,8 @@ Filtros: `date_from`, `date_to` (fecha o ISO; sin zona = Lima), `tiktoker_id`, `
 
 ## Retención (política explícita)
 
-`COMMENTS_RETENTION_DAYS` (30). Cada día se eliminan `live_comments` vencidos. **No** se tocan
-lives, métricas, contactos, auditoría ni rankings.
+`COMMENTS_RETENTION_DAYS` (30). Cada día se eliminan `live_comments` y `audience_members`
+vencidos. **No** se tocan lives, métricas, contactos ni auditoría.
 
 - Las claves de idempotencia de un live se conservan mientras pueda recibir eventos; solo se
   borran las de lives terminados/cancelados, que ya rechazan eventos (`409`).
@@ -273,7 +294,7 @@ las transmisiones, marca como publicados los eventos ya plegados y mueve el anti
    origen de Social Pulse), `VITE_CLERK_PUBLISHABLE_KEY`, `WEB_PORT`, `CORS_ORIGINS` si aplica.
 3. Reconstruir y desplegar `api`, `worker`, `monitor` y `social` (no basta reiniciar). La API
    aplica `alembic upgrade head` al iniciar.
-4. `python -m alembic current` debe mostrar `0010 (head)` (carga a las 6 TikTokers, crea las tablas de alertas y las columnas de totales de audiencia).
+4. `python -m alembic current` debe mostrar `0011 (head)` (carga a las 6 TikTokers, crea las tablas de alertas, las columnas de totales de audiencia y `audience_members`, que se rellena con el historial de `raw_events`).
 5. Esperar el primer ciclo del worker (convierte el historial) y revisar logs. Los LIVE que ya
    estaban al aire reciben su título en ≤5 min tras reiniciar `monitor`; los LIVE anteriores
    (sin título guardado) siguen «Sin asignar» hasta asignarlos con `PATCH` si hace falta.

@@ -25,6 +25,7 @@ import {
   SlidersHorizontal,
   Sparkles,
   TrendingUp,
+  Trophy,
   UserPlus,
   Users,
   X,
@@ -32,13 +33,21 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { downloadLiveComments, LiveApi } from "@/features/workspace/api";
+import { AudiencePanel } from "@/features/audience/AudiencePanel";
 import { AlertsPanel } from "@/features/notifications/AlertsPanel";
 import { NotificationBell } from "@/features/notifications/NotificationBell";
 import { useBoard } from "@/features/workspace/useBoard";
 import { MessageStatus, SocialMessage, useWorkspace } from "@/features/workspace/useWorkspace";
 
 type View = "Pulso" | "Bandeja" | "Contactos" | "Ajustes";
-type MarketingView = "Resumen" | "Equipo" | "Transmisiones" | "Alertas";
+type MarketingView = "Resumen" | "Equipo" | "Transmisiones" | "Audiencia" | "Alertas";
+const MARKETING_VIEWS: MarketingView[] = [
+  "Resumen",
+  "Equipo",
+  "Transmisiones",
+  "Audiencia",
+  "Alertas",
+];
 
 const ROLE_LABEL: Record<string, string> = {
   agente_ventas: "Agente call center",
@@ -378,7 +387,7 @@ function MarketingDashboard({ initialView = "Resumen" }: { initialView?: Marketi
         <div className="mx-auto flex h-[68px] max-w-[1400px] items-center justify-between px-4 sm:px-6">
           <Logo />
           <nav className="hidden items-center gap-1 lg:flex">
-            {(["Resumen", "Equipo", "Transmisiones", "Alertas"] as MarketingView[]).map((item) => (
+            {MARKETING_VIEWS.map((item) => (
               <button
                 type="button"
                 key={item}
@@ -393,6 +402,9 @@ function MarketingDashboard({ initialView = "Resumen" }: { initialView?: Marketi
           </nav>
           <div className="flex items-center gap-2">
             <NotificationBell onOpenAlerts={() => setView("Alertas")} />
+            <a href="/integraciones/tiktok" className="rounded-xl px-3 py-2 text-xs font-semibold text-primary">
+              Conectar TikTok
+            </a>
             <span className="hidden rounded-full bg-violet-50 px-3 py-1.5 text-[11px] font-bold text-violet-700 sm:inline-flex">
               {ROLE_LABEL[user?.role ?? ""] ?? "Marketing"}
             </span>
@@ -445,7 +457,7 @@ function MarketingDashboard({ initialView = "Resumen" }: { initialView?: Marketi
         )}
 
         <div className="mt-6 flex gap-2 overflow-x-auto lg:hidden">
-          {(["Resumen", "Equipo", "Transmisiones", "Alertas"] as MarketingView[]).map((item) => (
+          {MARKETING_VIEWS.map((item) => (
             <button
               type="button"
               key={item}
@@ -597,6 +609,8 @@ function MarketingDashboard({ initialView = "Resumen" }: { initialView?: Marketi
           </section>
         )}
 
+        {view === "Audiencia" && <AudiencePanel lives={lives} />}
+
         {view === "Alertas" && <AlertsPanel />}
 
         {view === "Transmisiones" && (
@@ -652,8 +666,8 @@ function MarketingDashboard({ initialView = "Resumen" }: { initialView?: Marketi
 
       <nav className="sticky bottom-0 z-30 border-t border-line bg-white px-3 py-2 lg:hidden">
         <div className="mx-auto flex max-w-sm justify-around">
-          {(["Resumen", "Equipo", "Transmisiones", "Alertas"] as MarketingView[]).map((item, index) => {
-            const Icon = index === 0 ? Activity : index === 1 ? Users : index === 2 ? Music2 : Bell;
+          {MARKETING_VIEWS.map((item, index) => {
+            const Icon = [Activity, Users, Music2, Trophy, Bell][index];
             return (
               <button
                 type="button"

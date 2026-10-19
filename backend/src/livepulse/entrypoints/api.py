@@ -7,7 +7,9 @@ from ..modules.identity.api import router as identity_router
 from ..modules.social_live.alerts_api import router as alerts_router
 from ..modules.social_live.api import marketing as marketing_router
 from ..modules.social_live.api import social as social_live_router
+from ..modules.social_live.audience import router as audience_router
 from ..modules.social_live.leads import router as leads_router
+from ..modules.tiktok_oauth.api import router as tiktok_oauth_router
 from ..shared.auth import get_current_user
 from ..shared.config import settings
 
@@ -20,6 +22,8 @@ app.include_router(social_live_router)
 app.include_router(marketing_router)
 app.include_router(leads_router)
 app.include_router(alerts_router)
+app.include_router(audience_router)
+app.include_router(tiktok_oauth_router)
 app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins,
                    allow_methods=["GET", "POST", "PUT", "PATCH"],
                    allow_headers=["Authorization", "Content-Type"])

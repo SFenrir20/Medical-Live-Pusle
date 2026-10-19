@@ -85,6 +85,9 @@ class EventIn(Stamped):
     # far (on `viewer`). Dropped or batched events cannot lower it.
     total: int | None = Field(default=None, ge=0, le=2_000_000_000)
     phone: str | None = Field(default=None, max_length=40)
+    # Shown name of the user (TikTok nickname) and diamonds of a gift, for the fan ranking.
+    display_name: str | None = Field(default=None, max_length=128)
+    diamonds: int = Field(default=0, ge=0, le=2_000_000_000)
     timestamp: datetime | None = None
     event_id: str | None = Field(default=None, min_length=1, max_length=128)
 

@@ -13,7 +13,8 @@ ROLES = ROLE_CODES
 # Review of suspicious contacts (re-sent numbers, "nobody contacted me" comments) and the
 # download of the contact list: supervisor, marketing head and manager.
 ALERTS = {'alerts:read', 'alerts:review', 'contacts:export'}
-MARKETING = {'screen:marketing', 'read', 'export', *ALERTS}
+# Ranking of fans (who comments, gives gifts, stays): the managers only, never agents.
+MARKETING = {'screen:marketing', 'read', 'export', 'audience:read', *ALERTS}
 # Attention workflow (validated server-side; none of these can write events):
 CONTACT_WORK = {'contacts:read', 'contacts:claim', 'contacts:update'}
 CONTACT_MANAGE = {*CONTACT_WORK, 'contacts:read_all', 'contacts:assign_any'}
