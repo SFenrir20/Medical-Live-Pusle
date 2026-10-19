@@ -112,6 +112,29 @@ Agregar o cambiar una TikToker: `POST /api/social-live/tiktokers`
 `{"id": "TK-X07", "name": "Xi", "full_name": "Ximena", "code": "X7"}` (el código es una letra y
 uno o dos dígitos y debe ser único; `409` si ya existe).
 
+## Por qué las cifras no coinciden con TikTok Studio
+
+TikTok Studio muestra las analíticas **finales** de TikTok (completas, depuradas, calculadas en sus
+servidores). LivePulse cuenta lo que llega por el **chat en vivo** (websocket), que es un flujo
+parcial: agrupa mensajes, omite entradas en salas grandes y no trae algunas cifras. Por eso solo
+coinciden las que llegan completas.
+
+| Cifra | Cómo la obtenemos | Por qué difiere de Studio |
+|---|---|---|
+| Me gusta | suma de los mensajes de «me gusta»; además el **total acumulado** que TikTok informa en cada mensaje | Los mensajes se agrupan y algunos no llegan. Se muestra el mayor entre nuestra suma y el total de TikTok (`likes_summed`, `likes_reported_total`) |
+| Visualizaciones | conteo de **entradas** (`join`) que llegan por el chat | TikTok no emite una entrada por cada espectador en salas grandes: queda por debajo. Se muestra como «Ingresos observados», no como visualizaciones |
+| Visitantes acumulados | `total_user` de TikTok (visitantes hasta el momento) | Es el valor más cercano a «visualizaciones/espectadores únicos» de Studio; se muestra aparte para **calibrar** contra Studio |
+| Espectadores únicos | no hay fuente exacta | «No disponible»; Studio es la referencia |
+| Pico / promedio simultáneo | muestras de espectadores actuales | Las muestras son irregulares y TikTok calcula por tiempo. El promedio ahora se **pondera por tiempo** (una muestra vale lo que duró, máx. 2 min); el pico es el mayor valor observado y puede diferir unos puntos |
+| Seguidores nuevos | eventos de seguir | Studio descuenta quien deja de seguir: ±1–2 |
+| Compartidos | eventos de compartir | Coinciden (llegan completos) |
+| Mensajes directos | — | No se capturan |
+| «Espectadores interesados» | reglas sobre comentarios con intención de compra | **No es** la métrica de TikTok del mismo nombre (clics en formularios/descripción del servicio); son conceptos distintos |
+
+Regla práctica: para informes oficiales usar TikTok Studio; LivePulse es el seguimiento en vivo
+y la fuente de comentarios, teléfonos y responsables. Las diferencias de unos pocos puntos en
+pico/promedio son normales; las de visualizaciones y me gusta eran estructurales.
+
 ## Alertas, recordatorios y descarga de contactos
 
 La **campana** de Social Pulse muestra a cada rol solo lo suyo (lo decide el servidor):
@@ -150,6 +173,27 @@ jefe de marketing, gerente y admin). Cada descarga queda en `export_audit`. Gere
 marketing ven teléfonos completos **solo** en estas alertas y en esa descarga.
 
 Variables: `ALERT_SAME_LIVE_MINUTES`, `REMINDER_FIRST_MINUTES`, `REMINDER_SECOND_MINUTES`.
+
+## Audiencia destacada (ranking de fans)
+
+Pestaña «Audiencia» de la vista de marketing: quiénes comentan, regalan o se quedan más.
+Permiso `audience:read` (supervisor, jefe de marketing, gerente y admin; **nunca** agentes ni los
+tokens de servicio). `GET /api/audience/top?live_id=&days=&sort=&limit=`: con `live_id` es ese
+live; sin él, el acumulado de los últimos `days` (máx. 90) de todos los lives, donde `lives > 1`
+son fans recurrentes. `sort`: `diamonds` (por defecto), `comments`, `likes`, `shares`,
+`presence`, `lives`; los empates se resuelven por diamantes, comentarios y likes.
+
+| Dato | Fuente | Fiabilidad |
+|---|---|---|
+| comentarios, likes, compartidos, regalos y diamantes | eventos del monitor, por persona | exacto (los tramos intermedios de una racha de regalos no cuentan) |
+| siguió | evento de follow | exacto |
+| tiempo visible | de la primera a la última vez que la persona aparece en un evento | **estimación**: TikTok no avisa quién sale y quien mira en silencio no genera eventos |
+| dejó contacto | su usuario figura en `captured_phones` | solo un sí/no: **el teléfono no se devuelve** |
+
+Se guarda en `audience_members` (una fila por live y usuario; el usuario se normaliza a
+minúsculas y sin `@`). Se alimenta en la misma ingestión que las métricas, así que cada evento
+cuenta una vez, y se borra con los comentarios (`COMMENTS_RETENTION_DAYS`). La migración `0011`
+reconstruye el historial desde `raw_events` para los lives ya ocurridos dentro de esa ventana.
 
 ## Ingestión — `/api/social-live` (token `ingest`)
 
@@ -190,8 +234,8 @@ Filtros: `date_from`, `date_to` (fecha o ISO; sin zona = Lima), `tiktoker_id`, `
 
 ## Retención (política explícita)
 
-`COMMENTS_RETENTION_DAYS` (30). Cada día se eliminan `live_comments` vencidos. **No** se tocan
-lives, métricas, contactos, auditoría ni rankings.
+`COMMENTS_RETENTION_DAYS` (30). Cada día se eliminan `live_comments` y `audience_members`
+vencidos. **No** se tocan lives, métricas, contactos ni auditoría.
 
 - Las claves de idempotencia de un live se conservan mientras pueda recibir eventos; solo se
   borran las de lives terminados/cancelados, que ya rechazan eventos (`409`).
@@ -250,7 +294,7 @@ las transmisiones, marca como publicados los eventos ya plegados y mueve el anti
    origen de Social Pulse), `VITE_CLERK_PUBLISHABLE_KEY`, `WEB_PORT`, `CORS_ORIGINS` si aplica.
 3. Reconstruir y desplegar `api`, `worker`, `monitor` y `social` (no basta reiniciar). La API
    aplica `alembic upgrade head` al iniciar.
-4. `python -m alembic current` debe mostrar `0009 (head)` (carga a las 6 TikTokers y crea las tablas de alertas).
+4. `python -m alembic current` debe mostrar `0011 (head)` (carga a las 6 TikTokers, crea las tablas de alertas, las columnas de totales de audiencia y `audience_members`, que se rellena con el historial de `raw_events`).
 5. Esperar el primer ciclo del worker (convierte el historial) y revisar logs. Los LIVE que ya
    estaban al aire reciben su título en ≤5 min tras reiniciar `monitor`; los LIVE anteriores
    (sin título guardado) siguen «Sin asignar» hasta asignarlos con `PATCH` si hace falta.

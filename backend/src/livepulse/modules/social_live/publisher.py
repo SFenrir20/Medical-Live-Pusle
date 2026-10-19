@@ -69,30 +69,37 @@ def to_event(raw: RawEvent) -> EventIn | None:
     kind = raw.type
     user = str(payload.get('username') or payload.get('nickname') or payload.get('user') or '')
     user = user.strip()[:128] or None
+    nickname = str(payload.get('nickname') or '').strip()[:128] or None
     if kind == 'comment':
         text = (raw.raw_text or '').strip()
         if not text or not user:
             return None
-        return EventIn(event_type='comment', username=user, text=text[:2000], **common)
+        return EventIn(event_type='comment', username=user, display_name=nickname,
+                       text=text[:2000], **common)
     if kind == 'like':
-        return EventIn(event_type='like', value=_count(payload.get('count'), 1), **common)
+        return EventIn(event_type='like', value=_count(payload.get('count'), 1),
+                       total=_count(payload.get('total'), 0) or None, username=user,
+                       display_name=nickname, **common)
     if kind == 'share':
-        return EventIn(event_type='share', username=user, **common)
+        return EventIn(event_type='share', username=user, display_name=nickname, **common)
     if kind == 'follow':
-        return EventIn(event_type='follow', username=user, **common)
+        return EventIn(event_type='follow', username=user, display_name=nickname, **common)
     if kind == 'join':
-        return EventIn(event_type='view', username=user, **common)
+        return EventIn(event_type='view', username=user, display_name=nickname, **common)
     if kind == 'audience':
         if payload.get('viewers') is None:
             return None
-        return EventIn(event_type='viewer', value=_count(payload.get('viewers'), 0), **common)
+        return EventIn(event_type='viewer', value=_count(payload.get('viewers'), 0),
+                       total=_count(payload.get('visitors'), 0) or None, **common)
     if kind == 'gift':
         # Streaks report intermediate ticks; count only the final one (same rule as analytics).
         final = _count(payload.get('gift_type'), 0) != 1 or _count(payload.get('repeat_end'), 0) == 1
         quantity = max(1, _count(payload.get('repeat_count'), 1)) if final else 0
         if not quantity:
             return None
-        return EventIn(event_type='donation', username=user, value=quantity, **common)
+        diamonds = _count(payload.get('diamond_count'), 0) * quantity
+        return EventIn(event_type='donation', username=user, display_name=nickname,
+                       value=quantity, diamonds=min(diamonds, 2_000_000_000), **common)
     return None  # live_end etc.: the lifecycle store already closes the broadcast
 
 

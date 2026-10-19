@@ -26,6 +26,11 @@ class Settings(BaseSettings):
     reminder_second_minutes: int = 20
     # Private messages are not captured by any integration. Flip only when one exists.
     dm_capture_connected: bool = False
+    # TikTok Marketing API OAuth. Server-only; unrelated to the LIVE capture provider.
+    tiktok_app_id: str = ""
+    tiktok_app_secret: str = ""
+    tiktok_redirect_uri: str = ""
+    tiktok_token_encryption_key: str = ""
     cors_origins: list[str] = []
     # Captura TikTok: account_id interno -> usuario TikTok (sin @).
     tiktok_accounts: dict[str, str] = {"medical": "medical.cirugias", "medical-2": "medical.cirugias2"}

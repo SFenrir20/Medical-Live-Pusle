@@ -129,6 +129,15 @@ class LiveMetrics(Base):
     peak_viewers = Column(Integer, nullable=False, server_default='0')
     viewer_samples = Column(Integer, nullable=False, server_default='0')
     viewer_sum = Column(BigInteger, nullable=False, server_default='0')
+    # Time-weighted audience: viewer-seconds / observed seconds (a sample counts for the time
+    # it lasted, capped so a monitor outage is not filled with the last value).
+    viewer_weighted_sum = Column(BigInteger, nullable=False, server_default='0')
+    viewer_observed_seconds = Column(Integer, nullable=False, server_default='0')
+    viewer_last_value = Column(Integer)
+    viewer_last_at = Column(DateTime(timezone=True))
+    # Running totals reported by TikTok (cross-check for likes and visitors).
+    likes_reported_total = Column(Integer, nullable=False, server_default='0')
+    visitors_reported_total = Column(Integer, nullable=False, server_default='0')
     comments_count = Column(Integer, nullable=False, server_default='0')
     likes_count = Column(Integer, nullable=False, server_default='0')
     shares_count = Column(Integer, nullable=False, server_default='0')
@@ -238,6 +247,34 @@ class ContactAlert(Base):
         CheckConstraint("status IN ('open','reviewed','dismissed')",
                         name='ck_contact_alerts_status'),
         Index('ix_contact_alerts_status', 'status', 'created_at'),
+    )
+
+
+class AudienceMember(Base):
+    """What one TikTok user did in one live (comments, likes, gifts...), for the managers'
+    ranking of fans. Temporary like the comments: purged after COMMENTS_RETENTION_DAYS.
+    first/last_seen_at are the first and last time the user showed up in an event; TikTok does
+    not report who leaves, so their distance is an estimate of the time watching."""
+    __tablename__ = 'audience_members'
+    id = Column(PK_BIG, primary_key=True, autoincrement=True)
+    live_id = Column(String(40), ForeignKey('lives.id'), nullable=False)
+    user_key = Column(String(128), nullable=False)      # lower-case TikTok id, without '@'
+    username = Column(String(128), nullable=False)
+    display_name = Column(String(128))
+    first_seen_at = Column(DateTime(timezone=True), nullable=False)
+    last_seen_at = Column(DateTime(timezone=True), nullable=False)
+    comments = Column(Integer, nullable=False, server_default='0')
+    likes = Column(Integer, nullable=False, server_default='0')
+    shares = Column(Integer, nullable=False, server_default='0')
+    gifts = Column(Integer, nullable=False, server_default='0')
+    diamonds = Column(BigInteger, nullable=False, server_default='0')
+    follows = Column(Integer, nullable=False, server_default='0')
+    joins = Column(Integer, nullable=False, server_default='0')
+
+    __table_args__ = (
+        UniqueConstraint('live_id', 'user_key', name='uq_audience_live_user'),
+        Index('ix_audience_user', 'user_key'),
+        Index('ix_audience_last_seen', 'last_seen_at'),
     )
 
 

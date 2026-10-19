@@ -31,6 +31,7 @@ from .schemas import EventIn
 
 LATE_EVENT_GRACE = timedelta(minutes=5)
 SOURCE_BY_EVENT = {'phone_detected': 'comment', 'phone_manual': 'manual_capture'}
+VIEWER_GAP_CAP_S = 120  # longest stretch one audience sample may stand for
 COUNTER = {'like': 'likes_count', 'view': 'views', 'share': 'shares_count',
            'follow': 'new_followers', 'donation': 'donations_count'}
 
@@ -168,6 +169,31 @@ async def _bump(session, live_id, column, amount):
         **{column: getattr(LiveMetrics, column) + amount, 'updated_at': utcnow()}))
 
 
+async def _raise(session, live_id, column, value):
+    """Keep the highest value seen (running totals only grow)."""
+    current = getattr(LiveMetrics, column)
+    await session.execute(update(LiveMetrics).where(LiveMetrics.live_id == live_id).values(
+        **{column: case((current < value, value), else_=current), 'updated_at': utcnow()}))
+
+
+async def record_audience(session, live_id, viewers, at):
+    """One concurrent-viewers sample: peak, simple mean inputs and the time-weighted average."""
+    row = await session.scalar(select(LiveMetrics).where(LiveMetrics.live_id == live_id))
+    at = aware_utc(at)
+    values = {'peak_viewers': max(row.peak_viewers, viewers),
+              'viewer_samples': row.viewer_samples + 1, 'viewer_sum': row.viewer_sum + viewers,
+              'updated_at': utcnow()}
+    last_at = aware_utc(row.viewer_last_at) if row.viewer_last_at else None
+    if last_at is None or at >= last_at:
+        if last_at is not None and row.viewer_last_value is not None:
+            seconds = min(int((at - last_at).total_seconds()), VIEWER_GAP_CAP_S)
+            values['viewer_weighted_sum'] = row.viewer_weighted_sum + row.viewer_last_value * seconds
+            values['viewer_observed_seconds'] = row.viewer_observed_seconds + seconds
+        values['viewer_last_value'], values['viewer_last_at'] = viewers, at
+    await session.execute(update(LiveMetrics).where(LiveMetrics.live_id == live_id)
+                          .values(**values))
+
+
 async def audit(session, registry_id, actor, action, previous=None, value=None):
     session.add(ContactAudit(registry_id=registry_id, actor=actor, action=action,
                              previous=previous, value=value))
@@ -283,8 +309,12 @@ async def ingest(session, live: Live, event: EventIn, *, strict_age: bool = True
     if not await _claim_event(session, live.id, event.event_id):
         return {'accepted': False, 'duplicate': True, 'event_type': event.event_type}
 
-    from .alerts import check_reappearance  # alerts imports this module
+    from . import audience  # audience and alerts import this module
+    from .alerts import check_reappearance
 
+    if event.username:  # fan ranking: who did what in this live
+        await audience.record(session, live.id, event.username, event.display_name, at,
+                              audience.contribution(event))
     kind, new_phones, affected = event.event_type, 0, {live.id}
     if kind == 'comment':
         text = (event.text or '').strip()
@@ -309,13 +339,13 @@ async def ingest(session, live: Live, event: EventIn, *, strict_age: bool = True
             await check_reappearance(session, live, phone, at, outcome)
     elif kind in COUNTER:
         await _bump(session, live.id, COUNTER[kind], event.value)
+        if kind == 'like' and event.total:
+            await _raise(session, live.id, 'likes_reported_total', event.total)
     elif kind == 'viewer':
         # A sample of CONCURRENT viewers: feeds peak and average, never "unique viewers".
-        await session.execute(update(LiveMetrics).where(LiveMetrics.live_id == live.id).values(
-            peak_viewers=case((LiveMetrics.peak_viewers < event.value, event.value),
-                              else_=LiveMetrics.peak_viewers),
-            viewer_samples=LiveMetrics.viewer_samples + 1,
-            viewer_sum=LiveMetrics.viewer_sum + event.value, updated_at=utcnow()))
+        await record_audience(session, live.id, event.value, at)
+        if event.total:
+            await _raise(session, live.id, 'visitors_reported_total', event.total)
     elif kind == 'unique_viewers':
         await session.execute(update(LiveMetrics).where(LiveMetrics.live_id == live.id).values(
             unique_viewers=case((LiveMetrics.unique_viewers.is_(None), event.value),
