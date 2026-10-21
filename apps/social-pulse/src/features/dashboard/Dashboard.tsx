@@ -33,6 +33,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { downloadLiveComments, LiveApi } from "@/features/workspace/api";
+import { BrandLogo } from "@/features/auth/BrandLogo";
 import { AudiencePanel } from "@/features/audience/AudiencePanel";
 import { AlertsPanel } from "@/features/notifications/AlertsPanel";
 import { NotificationBell } from "@/features/notifications/NotificationBell";
@@ -155,17 +156,10 @@ function useNow(everyMs = 1000) {
 
 function Logo() {
   return (
-    <div className="flex items-center gap-3">
-      <span className="grid size-10 shrink-0 place-items-center rounded-2xl bg-primary text-white shadow-lg shadow-primary/20">
-        <Activity size={21} strokeWidth={2.5} />
-      </span>
-      <span className="hidden sm:block">
-        <span className="block text-sm font-bold tracking-tight text-ink">
-          Medical Social Pulse
-        </span>
-        <span className="block text-[11px] text-muted">Centro de monitoreo</span>
-      </span>
-    </div>
+    <>
+      <BrandLogo mark className="h-9 sm:hidden" />
+      <BrandLogo className="hidden h-10 sm:block" />
+    </>
   );
 }
 
