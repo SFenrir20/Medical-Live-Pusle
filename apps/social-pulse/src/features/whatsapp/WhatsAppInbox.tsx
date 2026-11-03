@@ -14,12 +14,12 @@ type Appearance = { live_id: string; title: string | null; account_id: string; t
   captured_at: string; sent_at: string | null; seconds_to_send: number | null; source: string | null;
   delivered_at: string | null; read_at: string | null; next_inbound_at: string | null };
 type Detail = Conversation & { messages: Message[]; has_more: boolean; lives: Appearance[] };
-type Status = { state: string; phone?: string; qr?: string; detail?: string; unresolved?: number; sync_ok?: boolean; sync_at?: string };
+type Status = { state: string; phone?: string | null; qr?: string; detail?: string; unresolved?: number; sync_ok?: boolean; sync_at?: string };
 const labels: Record<string, string> = { queued: 'En cola', sending: 'Confirmando envío', sent: 'Enviado',
   delivered: 'Entregado', read: 'Leído', received: 'Recibido', unknown: 'Envío sin confirmar', blocked: 'No enviado' };
 const states: Record<string, string> = { connected: 'Conectado', connecting: 'Conectando', qr: 'Espera vinculación',
   disconnected: 'Desconectado', unavailable: 'Conector no disponible', relink_required: 'Requiere nueva vinculación',
-  wrong_number: 'Se vinculó un número diferente al configurado' };
+  wrong_number: 'No se pudo identificar la cuenta o no coincide con la cuenta vinculada' };
 const date = (value: string | null) => value ? new Date(value).toLocaleString('es-PE', { timeZone: 'America/Lima' }) : '—';
 function errorText(error: unknown) {
   const data = error as { response?: { data?: { detail?: unknown } } };
@@ -153,8 +153,9 @@ export function WhatsAppInbox() {
     {status.state === 'connected' && status.sync_ok === false && <p role="alert" className="mx-auto mb-4 max-w-[1600px] rounded-xl bg-amber-50 p-3 text-amber-800">WhatsApp está vinculado, pero la sincronización no está al día. Última sincronización: {date(status.sync_at || null)}. Contacta al administrador.</p>}
     {mayManage && status.qr && <section className="mx-auto mb-5 flex max-w-[1600px] flex-wrap items-center gap-5 rounded-2xl border border-line bg-white p-5">
       <img src={status.qr} width={220} height={220} alt="QR de vinculación de WhatsApp" />
-      <div><h2 className="font-bold">Vincula el número {status.phone}</h2>
-        <p>En ese teléfono: WhatsApp → Dispositivos vinculados → Vincular dispositivo.</p>
+      <div><h2 className="font-bold">{status.phone ? `Vincula el número ${status.phone}` : 'Vincula tu cuenta de WhatsApp'}</h2>
+        <p>En tu teléfono: WhatsApp → Dispositivos vinculados → Vincular dispositivo.</p>
+        {!status.phone && <p className="mt-2 text-sm text-muted">Detectaremos y guardaremos el número al escanear el QR.</p>}
         <p className="mt-2 text-sm text-muted">El QR se renueva. Solo supervisores y administradores pueden verlo.</p></div>
     </section>}
     {!!status.unresolved && <p className="mx-auto mb-4 max-w-[1600px] text-sm text-amber-800">Hay mensajes pendientes de identificar por teléfono. El conector reintentará al recibir la correspondencia de WhatsApp.</p>}

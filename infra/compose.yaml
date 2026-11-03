@@ -122,7 +122,7 @@ services:
     environment:
       WA_GATEWAY_TOKEN: ${WA_GATEWAY_TOKEN:-}
       WA_SESSION_KEY: ${WA_SESSION_KEY:-}
-      WA_EXPECTED_PHONE: ${WA_EXPECTED_PHONE:-}
+      WA_EXPECTED_PHONE: ${WA_EXPECTED_PHONE:-} # Optional: otherwise learned from first QR pairing.
     volumes:
       - wa-session:/data
 
