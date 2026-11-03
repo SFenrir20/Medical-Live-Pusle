@@ -34,6 +34,13 @@ services:
       ALERT_SAME_LIVE_MINUTES: ${ALERT_SAME_LIVE_MINUTES:-10}
       REMINDER_FIRST_MINUTES: ${REMINDER_FIRST_MINUTES:-10}
       REMINDER_SECOND_MINUTES: ${REMINDER_SECOND_MINUTES:-20}
+      AUTO_ASSIGNMENT: ${AUTO_ASSIGNMENT:-true}
+      PRESENCE_OFFLINE_AFTER_S: ${PRESENCE_OFFLINE_AFTER_S:-60}
+      REDISTRIBUTE_GRACE_S: ${REDISTRIBUTE_GRACE_S:-60}
+      APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:-}
+      BOT_PAUSE_HOURS: ${BOT_PAUSE_HOURS:-6}
+      WA_GATEWAY_URL: ${WA_GATEWAY_URL:-http://wa-gateway:3001}
+      WA_GATEWAY_TOKEN: ${WA_GATEWAY_TOKEN:-}
       CORS_ORIGINS: ${CORS_ORIGINS:-[]}
       TIKTOK_APP_ID: ${TIKTOK_APP_ID:-}
       TIKTOK_APP_SECRET: ${TIKTOK_APP_SECRET:-}
@@ -97,9 +104,46 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://livepulse:livepulse@db:5432/livepulse
       COMMENTS_RETENTION_DAYS: ${COMMENTS_RETENTION_DAYS:-30}
+      AUTO_ASSIGNMENT: ${AUTO_ASSIGNMENT:-true}
+      PRESENCE_OFFLINE_AFTER_S: ${PRESENCE_OFFLINE_AFTER_S:-60}
+      REDISTRIBUTE_GRACE_S: ${REDISTRIBUTE_GRACE_S:-60}
+      APP_ENCRYPTION_KEY: ${APP_ENCRYPTION_KEY:-}
+      BOT_PAUSE_HOURS: ${BOT_PAUSE_HOURS:-6}
     depends_on:
       api:
         condition: service_healthy
 
+  # Optional linked-device mirror. No public port and no Meta Cloud API credentials.
+  wa-gateway:
+    profiles: ["whatsapp"]
+    build:
+      context: ../services/wa-gateway
+    restart: unless-stopped
+    environment:
+      WA_GATEWAY_TOKEN: ${WA_GATEWAY_TOKEN:-}
+      WA_SESSION_KEY: ${WA_SESSION_KEY:-}
+      WA_EXPECTED_PHONE: ${WA_EXPECTED_PHONE:-}
+    volumes:
+      - wa-session:/data
+
+  wa-worker:
+    profiles: ["whatsapp"]
+    image: medical-livepulse-worker:local
+    build:
+      context: ../backend
+      dockerfile: Dockerfile.worker
+    restart: unless-stopped
+    command: ["python", "-m", "livepulse.entrypoints.wa_worker"]
+    environment:
+      DATABASE_URL: postgresql+asyncpg://livepulse:livepulse@db:5432/livepulse
+      WA_GATEWAY_URL: http://wa-gateway:3001
+      WA_GATEWAY_TOKEN: ${WA_GATEWAY_TOKEN:-}
+    depends_on:
+      api:
+        condition: service_healthy
+      wa-gateway:
+        condition: service_healthy
+
 volumes:
   pgdata:
+  wa-session:

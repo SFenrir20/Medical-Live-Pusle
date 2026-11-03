@@ -8,6 +8,7 @@ from sqlalchemy import func, select, update
 
 from livepulse.modules.social_live import models as m
 from livepulse.modules.social_live.retention import purge_expired
+from livepulse.shared.config import settings
 
 INGEST = {'Authorization': 'Bearer ingest-secret'}
 READ = {'Authorization': 'Bearer read-secret'}
@@ -90,7 +91,9 @@ async def test_events_consolidate_metrics_and_deduplicate_retries(env):
     assert metrics['leads_per_hour'] == pytest.approx(1.5, abs=0.1)  # 3 phones / 2 h
 
 
-async def test_single_event_and_comment_shortcut_and_invalid_input(env):
+async def test_single_event_and_comment_shortcut_and_invalid_input(env, monkeypatch):
+    # The fixed 2026-10-01 timestamps below age out of the 30-day window as the calendar moves.
+    monkeypatch.setattr(settings, 'comments_retention_days', 3650)
     client, _ = env
     live = await seed(client)
     ok = await client.post(f'{API}/lives/{live}/events', headers=INGEST, json={

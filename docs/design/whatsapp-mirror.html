@@ -1,0 +1,312 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Prototipo · Espejo de WhatsApp Business en Social Pulse CRM</title>
+<style>
+  :root {
+    --primary: #0f92ac; --primary-dark: #13618c; --primary-soft: #eaf8fa;
+    --ink: #14213d; --muted: #64748b; --line: #e2e8f0; --canvas: #f7f9fc;
+    --wa: #25d366; --wa-dark: #128c7e; --bubble-out: #d9fdd3; --bubble-in: #ffffff; --chat-bg: #efeae2;
+    --red: #ef4444; --amber: #f59e0b; --violet: #7c3aed; --emerald: #059669;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: Inter, ui-sans-serif, system-ui, "Segoe UI", sans-serif; color: var(--ink); background: var(--canvas); }
+  button { font: inherit; cursor: pointer; }
+  .banner { background: #fff7ed; color: #9a3412; font-size: 12px; padding: 8px 16px; text-align: center; border-bottom: 1px solid #fed7aa; }
+  header.top { display: flex; align-items: center; gap: 16px; padding: 0 20px; height: 60px; background: #fff; border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 5; }
+  .brand { font-weight: 800; color: var(--primary); letter-spacing: -.02em; }
+  nav.tabs { display: flex; gap: 4px; margin-left: 16px; flex-wrap: wrap; }
+  nav.tabs button { border: 0; background: none; padding: 9px 14px; border-radius: 12px; font-weight: 600; font-size: 14px; color: var(--muted); }
+  nav.tabs button.on { background: var(--primary-soft); color: var(--primary); }
+  nav.tabs .wa-dot::before { content: ""; display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--wa); margin-right: 7px; }
+  .screen { display: none; }
+  .screen.on { display: block; }
+
+  /* ---------- connect ---------- */
+  .connect { max-width: 1040px; margin: 28px auto; padding: 0 20px; }
+  h1 { font-size: 26px; letter-spacing: -.02em; margin: 0; }
+  .lead { color: var(--muted); font-size: 14px; line-height: 1.6; max-width: 720px; margin: 8px 0 0; }
+  .steps { display: flex; gap: 8px; margin: 24px 0; flex-wrap: wrap; }
+  .step { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; color: var(--muted); padding: 8px 12px; border-radius: 999px; background: #fff; border: 1px solid var(--line); }
+  .step i { font-style: normal; display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; background: var(--line); color: var(--muted); font-size: 12px; }
+  .step.on { color: var(--primary); border-color: #b6e3ec; background: var(--primary-soft); }
+  .step.on i, .step.done i { background: var(--primary); color: #fff; }
+  .step.done { color: var(--emerald); }
+  .step.done i { background: var(--emerald); }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .card { background: #fff; border: 1px solid var(--line); border-radius: 20px; padding: 22px; }
+  .card.reco { border: 2px solid var(--primary); box-shadow: 0 12px 30px rgb(15 146 172 / 12%); }
+  .card.warn { background: #fffbeb; border-color: #fde68a; }
+  .tag { display: inline-block; font-size: 11px; font-weight: 700; padding: 4px 9px; border-radius: 999px; }
+  .tag.green { background: #dcfce7; color: #166534; } .tag.amber { background: #fef3c7; color: #92400e; }
+  .tag.red { background: #fee2e2; color: #991b1b; } .tag.blue { background: var(--primary-soft); color: var(--primary); }
+  .tag.violet { background: #ede9fe; color: #5b21b6; } .tag.gray { background: #f1f5f9; color: #475569; }
+  ul.clean { padding-left: 18px; margin: 12px 0 0; font-size: 13px; line-height: 1.7; color: #334155; }
+  .btn { border: 0; border-radius: 14px; padding: 13px 18px; font-weight: 700; font-size: 14px; }
+  .btn.primary { background: var(--primary); color: #fff; box-shadow: 0 10px 24px rgb(15 146 172 / 22%); }
+  .btn.wa { background: var(--wa-dark); color: #fff; }
+  .btn.ghost { background: #fff; border: 1px solid var(--line); color: var(--ink); }
+  .btn.block { width: 100%; }
+  .flow { display: grid; grid-template-columns: 1fr 260px; gap: 18px; margin-top: 18px; align-items: start; }
+  .qr { width: 220px; height: 220px; margin: 0 auto; border-radius: 16px; border: 1px solid var(--line); background:
+      conic-gradient(from 0deg at 50% 50%, #111 0 25%, #fff 0 50%, #111 0 75%, #fff 0) 0 0 / 22px 22px; position: relative; }
+  .qr::after { content: ""; position: absolute; inset: 78px; border-radius: 14px; background: #fff url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="%2325d366"><path d="M12 2a10 10 0 0 0-8.6 15L2 22l5.2-1.4A10 10 0 1 0 12 2z"/></svg>') center / 36px no-repeat; }
+  .progress { height: 10px; background: #e2e8f0; border-radius: 99px; overflow: hidden; margin: 10px 0 6px; }
+  .progress span { display: block; height: 100%; width: 64%; background: linear-gradient(90deg, var(--primary), #35c2d8); border-radius: 99px; }
+  .kv { display: grid; grid-template-columns: 120px 1fr; gap: 6px 12px; font-size: 13px; margin-top: 12px; }
+  .kv dt { color: var(--muted); } .kv dd { margin: 0; font-weight: 600; }
+  .note { font-size: 12px; color: var(--muted); line-height: 1.6; margin-top: 10px; }
+
+  /* ---------- inbox ---------- */
+  .inbox { display: grid; grid-template-columns: 340px minmax(0, 1fr) 320px; height: calc(100vh - 60px - 35px); min-height: 640px; background: #fff; border-top: 1px solid var(--line); }
+  .col { min-width: 0; display: flex; flex-direction: column; }
+  .list { border-right: 1px solid var(--line); }
+  .list-head { padding: 14px; border-bottom: 1px solid var(--line); }
+  .search { width: 100%; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--canvas); font: inherit; font-size: 13px; }
+  .chips { display: flex; gap: 6px; margin-top: 10px; overflow-x: auto; }
+  .chips button { border: 1px solid var(--line); background: #fff; color: var(--muted); border-radius: 999px; padding: 6px 11px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+  .chips button.on { background: var(--primary-soft); color: var(--primary); border-color: #b6e3ec; }
+  .convs { overflow-y: auto; flex: 1; }
+  .conv { display: grid; grid-template-columns: 44px 1fr auto; gap: 10px; padding: 12px 14px; border-bottom: 1px solid #f1f5f9; cursor: pointer; }
+  .conv:hover { background: #f8fafc; }
+  .conv.on { background: var(--primary-soft); }
+  .av { width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; color: #fff; font-weight: 700; font-size: 15px; }
+  .conv b { font-size: 14px; } .conv .last { font-size: 13px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 2px; }
+  .conv .meta { text-align: right; font-size: 11px; color: var(--muted); display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+  .unread { background: var(--wa); color: #fff; font-weight: 700; border-radius: 999px; min-width: 20px; padding: 2px 6px; font-size: 11px; text-align: center; }
+  .mini { display: flex; gap: 4px; margin-top: 6px; flex-wrap: wrap; }
+  .mini .tag { font-size: 10px; padding: 2px 7px; }
+
+  .chat { background: var(--chat-bg); position: relative; }
+  .chat-head { background: #fff; padding: 10px 16px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid var(--line); }
+  .chat-head .grow { flex: 1; min-width: 0; }
+  .chat-head small { color: var(--muted); display: block; font-size: 12px; }
+  select.stage { border: 1px solid var(--line); border-radius: 10px; padding: 7px 10px; font: inherit; font-size: 13px; font-weight: 600; background: #fff; }
+  .msgs { flex: 1; overflow-y: auto; padding: 18px 8% 8px; display: flex; flex-direction: column; gap: 6px;
+    background-image: radial-gradient(rgb(0 0 0 / 3%) 1px, transparent 1px); background-size: 18px 18px; }
+  .day { align-self: center; background: #fff; border-radius: 8px; font-size: 11px; color: var(--muted); padding: 4px 10px; box-shadow: 0 1px 1px rgb(0 0 0 / 8%); margin: 6px 0; }
+  .sys { align-self: center; background: #fff8c5; color: #5f4b00; border-radius: 8px; font-size: 11.5px; padding: 6px 12px; max-width: 80%; text-align: center; }
+  .bub { max-width: 68%; padding: 7px 10px 5px; border-radius: 10px; font-size: 14px; line-height: 1.45; box-shadow: 0 1px 1px rgb(0 0 0 / 10%); position: relative; }
+  .bub.in { background: var(--bubble-in); align-self: flex-start; border-top-left-radius: 2px; }
+  .bub.out { background: var(--bubble-out); align-self: flex-end; border-top-right-radius: 2px; }
+  .bub time { display: block; text-align: right; font-size: 10.5px; color: #667781; margin-top: 2px; }
+  .bub time .ticks { color: #53bdeb; margin-left: 3px; }
+  .bub .who { font-size: 11px; font-weight: 700; color: var(--primary-dark); display: block; margin-bottom: 2px; }
+  .img { width: 220px; height: 130px; border-radius: 8px; background: linear-gradient(135deg, #cbd5e1, #94a3b8); display: grid; place-items: center; color: #fff; font-size: 12px; margin-bottom: 4px; }
+  .window { background: #fff; border-top: 1px solid var(--line); padding: 6px 16px; font-size: 12px; color: var(--muted); display: flex; justify-content: space-between; gap: 8px; }
+  .composer { background: #f0f2f5; padding: 10px 14px; display: flex; gap: 10px; align-items: center; }
+  .composer .quick { display: flex; gap: 6px; flex-wrap: wrap; position: absolute; left: 14px; bottom: 62px; }
+  .composer input { flex: 1; border: 0; border-radius: 22px; padding: 12px 16px; font: inherit; font-size: 14px; }
+  .icon { width: 38px; height: 38px; border-radius: 50%; border: 0; background: none; font-size: 18px; color: #54656f; }
+  .send { background: var(--wa-dark); color: #fff; }
+  .quickbar { display: flex; gap: 6px; padding: 8px 14px 0; background: #f0f2f5; flex-wrap: wrap; }
+  .quickbar button { border: 1px solid #d1d7db; background: #fff; border-radius: 999px; font-size: 12px; padding: 5px 11px; color: #3b4a54; }
+
+  .side { border-left: 1px solid var(--line); overflow-y: auto; padding: 16px; display: flex; flex-direction: column; gap: 14px; background: #fff; }
+  .side h4 { margin: 0 0 8px; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+  .profile { text-align: center; }
+  .profile .av { margin: 0 auto 8px; width: 64px; height: 64px; font-size: 22px; }
+  .origin { background: var(--primary-soft); border: 1px solid #b6e3ec; border-radius: 14px; padding: 12px; font-size: 12.5px; line-height: 1.55; }
+  .pipe { display: flex; flex-direction: column; gap: 6px; }
+  .pipe div { display: flex; align-items: center; gap: 8px; font-size: 13px; padding: 7px 10px; border-radius: 10px; border: 1px solid var(--line); }
+  .pipe div.on { background: var(--primary-soft); border-color: #b6e3ec; font-weight: 700; color: var(--primary); }
+  .pipe div.past { color: var(--emerald); }
+  .note-box { width: 100%; min-height: 70px; border: 1px solid var(--line); border-radius: 12px; padding: 10px; font: inherit; font-size: 13px; resize: vertical; }
+  .tl { font-size: 12px; color: #475569; line-height: 1.7; padding-left: 14px; border-left: 2px solid var(--line); }
+  .tl b { color: var(--ink); }
+
+  /* ---------- kanban ---------- */
+  .kanban { display: grid; grid-template-columns: repeat(5, minmax(210px, 1fr)); gap: 12px; padding: 20px; overflow-x: auto; }
+  .lane { background: #f1f5f9; border-radius: 16px; padding: 10px; min-height: 420px; }
+  .lane h5 { margin: 4px 6px 10px; font-size: 13px; display: flex; justify-content: space-between; }
+  .kcard { background: #fff; border-radius: 12px; padding: 10px 12px; margin-bottom: 8px; box-shadow: 0 1px 2px rgb(0 0 0 / 6%); font-size: 13px; }
+  .kcard small { color: var(--muted); display: block; margin-top: 3px; }
+
+  @media (max-width: 1100px) { .inbox { grid-template-columns: 300px minmax(0, 1fr); } .side { display: none; } .grid2, .flow { grid-template-columns: 1fr; } }
+  @media (max-width: 760px) { .inbox { grid-template-columns: 1fr; } .list { display: none; } }
+</style>
+</head>
+<body>
+<div class="banner">Prototipo de diseño con <b>datos de ejemplo</b> · modo espejo (dispositivo vinculado por QR) (nombres y números inventados). Nada de esto está conectado todavía a WhatsApp.</div>
+<header class="top">
+  <span class="brand">Medical Social Pulse CRM</span>
+  <nav class="tabs" id="tabs">
+    <button data-s="connect" class="on">1 · Vincular WhatsApp</button>
+    <button data-s="inbox" class="wa-dot">2 · Conversaciones</button>
+    <button data-s="kanban">3 · Embudo</button>
+  </nav>
+</header>
+
+<!-- ============ 1. CONNECT ============ -->
+<section class="screen on" id="connect">
+  <div class="connect">
+    <h1>Vincula tu WhatsApp Business</h1>
+    <p class="lead">Igual que WhatsApp Web: escaneas un código con el teléfono y las conversaciones aparecen aquí en espejo. Lo que escribe el equipo sale desde el número de la clínica, sin plantillas ni ventana de 24 horas. El teléfono sigue funcionando normal.</p>
+    <div class="steps">
+      <span class="step done"><i>✓</i>Elegir número</span>
+      <span class="step on"><i>2</i>Escanear el código</span>
+      <span class="step"><i>3</i>Sincronizar chats</span>
+      <span class="step"><i>4</i>Listo</span>
+    </div>
+
+    <div class="grid2">
+      <article class="card reco" style="text-align:center">
+        <span class="tag blue">Paso 2 · Escanea con el teléfono</span>
+        <div class="qr" style="margin:18px auto 12px"></div>
+        <p class="note" style="margin:0">El código se renueva solo cada 60 segundos.</p>
+        <ol style="text-align:left;font-size:13px;line-height:1.8;margin:16px 0 0;padding-left:20px;color:#334155">
+          <li>Abre <b>WhatsApp Business</b> en el teléfono de la clínica.</li>
+          <li>Toca <b>Ajustes → Dispositivos vinculados</b>.</li>
+          <li>Toca <b>Vincular un dispositivo</b> y apunta la cámara a este código.</li>
+        </ol>
+        <button class="btn ghost block" style="margin-top:16px" onclick="alert('Prototipo: genera un código nuevo')">Generar código nuevo</button>
+      </article>
+
+      <div style="display:flex;flex-direction:column;gap:16px">
+        <article class="card">
+          <h3 style="margin:0 0 4px">Qué se refleja aquí</h3>
+          <ul class="clean">
+            <li>Mensajes que llegan <b>y los que se escriben desde el teléfono</b> (verdadero espejo).</li>
+            <li>Fotos, notas de voz, documentos y estados de lectura (✓✓).</li>
+            <li>Los chats recientes al vincular (WhatsApp decide cuánto historial envía).</li>
+            <li>Cada chat enlazado con su contacto de TikTok LIVE: origen, etapa y asesor.</li>
+          </ul>
+        </article>
+        <article class="card warn">
+          <span class="tag amber">Cuidados para no perder el número</span>
+          <p class="note" style="margin-top:8px">Este método no es el oficial de WhatsApp; el sistema lo protege así:</p>
+          <ul class="clean">
+            <li>Solo escriben personas, <b>nunca envíos masivos</b> ni bots.</li>
+            <li>Tope diario de <b>chats nuevos</b> (ej. 20/día) y pausas entre mensajes.</li>
+            <li>Sin escribir de golpe a muchos contactos del LIVE: se contacta en tandas.</li>
+            <li>Aviso si el teléfono lleva horas sin conexión (la sesión caduca).</li>
+            <li>Recomendado: número con historial real, no uno recién creado.</li>
+          </ul>
+        </article>
+      </div>
+    </div>
+
+    <div class="flow">
+      <article class="card">
+        <h3 style="margin:0 0 4px">Estado de la conexión</h3>
+        <dl class="kv">
+          <dt>Número</dt><dd>+51 900 000 000 · WhatsApp Business</dd>
+          <dt>Sesión</dt><dd><span class="tag green">Conectada</span> · teléfono en línea</dd>
+          <dt>Vinculada</dt><dd>hoy 12:30 por supervisor.admin</dd>
+          <dt>Chats nuevos hoy</dt><dd>3 de 20 permitidos</dd>
+        </dl>
+        <p class="note">Si la sesión se cierra, aparece aquí «Vuelve a escanear el código» y las personas con chats pendientes reciben un aviso.</p>
+      </article>
+      <article class="card">
+        <h4 style="margin:0 0 10px;font-size:12px;color:var(--muted)">SINCRONIZANDO CHATS</h4>
+        <div class="progress"><span></span></div>
+        <div class="note" style="margin:0">Importando conversaciones… 64 %</div>
+        <div style="margin-top:14px"><button class="btn primary block" data-go="inbox">Ir a conversaciones</button></div>
+        <button class="btn ghost block" style="margin-top:8px">Desvincular</button>
+      </article>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 2. INBOX ============ -->
+<section class="screen" id="inbox">
+  <div class="inbox">
+    <aside class="col list">
+      <div class="list-head">
+        <input class="search" placeholder="Buscar paciente o teléfono">
+        <div class="chips" id="filters">
+          <button class="on">Todos 24</button><button>Míos 9</button><button>Sin asignar 6</button><button>No leídos 5</button><button>TikTok LIVE 11</button>
+        </div>
+      </div>
+      <div class="convs" id="convs"></div>
+    </aside>
+
+    <main class="col chat">
+      <div class="chat-head">
+        <div class="av" style="background:#0f92ac">CR</div>
+        <div class="grow"><b>Camila R.</b><small>+51 900 000 001 · en línea · <span style="color:var(--primary)">Asesora: Lucía M.</span></small></div>
+        <select class="stage"><option>Interesada</option><option>Nuevo</option><option>Cotización enviada</option><option>Cita agendada</option><option>Descartado</option></select>
+        <button class="btn ghost" style="padding:8px 12px">Reasignar</button>
+      </div>
+      <div class="msgs">
+        <span class="day">HOY</span>
+        <div class="sys">Contacto creado desde un comentario en el LIVE TT-24 (@medical.cirugias) a las 12:48 · «me interesa el precio»</div>
+        <div class="bub out"><span class="who">Lucía M. · asesora</span>Hola Camila 👋 soy Lucía de Medical. Vi tu comentario en nuestro LIVE, ¿te cuento sobre la consulta de valoración?<time>12:55 <span class="ticks">✓✓</span></time></div>
+        <div class="bub in">Hola! sí por favor, ¿cuánto cuesta la valoración?<time>12:58</time></div>
+        <div class="bub in">y si atienden sábados<time>12:58</time></div>
+        <div class="bub out">La valoración con el cirujano cuesta S/ 80 y sí atendemos sábados de 9 a 1 😊<time>13:01 <span class="ticks">✓✓</span></time></div>
+        <div class="bub out"><div class="img">📎 tarifas-valoracion.jpg</div>Te dejo la información de nuestros paquetes.<time>13:02 <span class="ticks">✓✓</span></time></div>
+        <div class="bub in">Perfecto, me interesa el sábado. ¿Hay cupo?<time>13:10</time></div>
+        <div class="bub out"><span class="who">📱 Escrito desde el teléfono</span>Déjame revisar la agenda y te confirmo en un momento<time>13:11 <span class="ticks" style="color:#8696a0">✓✓</span></time></div>
+        <div class="sys">Lucía M. cambió la etapa a «Interesada» · se marcó como <b>contactada</b> automáticamente a las 12:55 (su primer mensaje)</div>
+      </div>
+      <div class="quickbar"><button>/saludo</button><button>/precios valoración</button><button>/ubicación</button><button>/agendar sábado</button><button>📎 Enviar ubicación</button></div>
+      <div class="window"><span>🟢 Sesión conectada · teléfono en línea · Chats nuevos hoy: <b>3/20</b></span><span>Envías como <b>Lucía M.</b> desde +51 900 000 000</span></div>
+      <div class="composer"><button class="icon">😊</button><button class="icon">📎</button><input placeholder="Escribe un mensaje o / para respuestas rápidas"><button class="icon send">➤</button></div>
+    </main>
+
+    <aside class="side">
+      <div class="profile"><div class="av" style="background:#0f92ac">CR</div><b>Camila R.</b><div style="font-size:12px;color:var(--muted)">+51 900 000 001</div></div>
+      <div>
+        <h4>Origen</h4>
+        <div class="origin">📺 <b>TikTok LIVE</b> · TT-24 · @medical.cirugias<br>Primera captura: hoy 12:48 (comentario)<br>Apariciones en LIVES: <b>2</b> · Usuario TikTok: <b>@camila.rr</b></div>
+      </div>
+      <div>
+        <h4>Etapa del paciente</h4>
+        <div class="pipe"><div class="past">✓ Nuevo</div><div class="on">● Interesada</div><div>Cotización enviada</div><div>Cita agendada</div><div>Atendida</div></div>
+      </div>
+      <div><h4>Etiquetas</h4><span class="tag blue">Valoración</span> <span class="tag violet">Sábado</span> <span class="tag gray">+ añadir</span></div>
+      <div><h4>Nota interna (el paciente no la ve)</h4><textarea class="note-box" placeholder="Ej.: prefiere hablar por la tarde"></textarea></div>
+      <div>
+        <h4>Actividad</h4>
+        <div class="tl"><b>13:11</b> Lucía respondió<br><b>12:58</b> Camila escribió<br><b>12:55</b> Primer contacto · marcada «contactada»<br><b>12:48</b> Capturada desde el LIVE TT-24</div>
+      </div>
+      <button class="btn primary">📅 Agendar consulta</button>
+    </aside>
+  </div>
+</section>
+
+<!-- ============ 3. KANBAN ============ -->
+<section class="screen" id="kanban">
+  <div class="kanban" id="board"></div>
+</section>
+
+<script>
+  const people = [
+    ['Camila R.', 'CR', '#0f92ac', 'Perfecto, me interesa el sábado. ¿Hay cupo?', '13:10', 2, 'Interesada', 'TikTok LIVE', true],
+    ['Valeria S.', 'VS', '#7c3aed', 'Gracias, ya envié mi DNI', '12:41', 0, 'Cita agendada', 'WhatsApp', false],
+    ['+51 900 000 014', '14', '#64748b', 'Hola, vi su anuncio', '12:30', 1, 'Nuevo', 'Meta Ads', false],
+    ['Andrea P.', 'AP', '#db2777', '¿Tienen financiamiento?', '11:52', 1, 'Interesada', 'TikTok LIVE', false],
+    ['Diana L.', 'DL', '#059669', 'Voy el viernes entonces 😊', '11:20', 0, 'Cita agendada', 'TikTok LIVE', false],
+    ['Rosa M.', 'RM', '#d97706', 'Me pueden llamar mejor?', 'Ayer', 1, 'Cotización enviada', 'WhatsApp', false],
+    ['+51 900 000 022', '22', '#64748b', 'Buenas tardes', 'Ayer', 0, 'Nuevo', 'TikTok LIVE', false],
+    ['Sofía T.', 'ST', '#0891b2', 'Muchas gracias por todo', 'Lun', 0, 'Atendida', 'WhatsApp', false],
+  ];
+  document.getElementById('convs').innerHTML = people.map((p, i) => `
+    <div class="conv ${i === 0 ? 'on' : ''}">
+      <div class="av" style="background:${p[2]}">${p[1]}</div>
+      <div style="min-width:0"><b>${p[0]}</b><div class="last">${p[3]}</div>
+        <div class="mini"><span class="tag ${p[7] === 'TikTok LIVE' ? 'blue' : p[7] === 'Meta Ads' ? 'violet' : 'gray'}">${p[7]}</span><span class="tag gray">${p[6]}</span></div></div>
+      <div class="meta"><span>${p[4]}</span>${p[5] ? `<span class="unread">${p[5]}</span>` : ''}</div>
+    </div>`).join('');
+
+  const lanes = ['Nuevo', 'Interesada', 'Cotización enviada', 'Cita agendada', 'Atendida'];
+  document.getElementById('board').innerHTML = lanes.map(l => {
+    const cards = people.filter(p => p[6] === l);
+    return `<div class="lane"><h5>${l}<span class="tag gray">${cards.length}</span></h5>${cards.map(p =>
+      `<div class="kcard"><b>${p[0]}</b><small>${p[3]}</small><div class="mini"><span class="tag ${p[7] === 'TikTok LIVE' ? 'blue' : 'gray'}">${p[7]}</span></div></div>`).join('')}</div>`;
+  }).join('');
+
+  const show = id => {
+    document.querySelectorAll('.screen').forEach(s => s.classList.toggle('on', s.id === id));
+    document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.s === id));
+  };
+  document.querySelectorAll('#tabs button').forEach(b => b.onclick = () => show(b.dataset.s));
+  document.querySelectorAll('[data-go]').forEach(b => b.onclick = () => show(b.dataset.go));
+  document.querySelectorAll('.chips button').forEach(b => b.onclick = () => { b.parentNode.querySelectorAll('button').forEach(x => x.classList.remove('on')); b.classList.add('on'); });
+  if (location.hash === '#inbox' || location.hash === '#kanban') show(location.hash.slice(1));
+</script>
+</body>
+</html>

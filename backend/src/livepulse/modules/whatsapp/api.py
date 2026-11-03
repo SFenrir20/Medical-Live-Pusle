@@ -1,0 +1,188 @@
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from pydantic import BaseModel, Field
+from sqlalchemy import case, func, or_, select, update
+from sqlalchemy.orm import aliased
+
+from ...shared.db import get_session
+from ..analytics.models import MonitorState, UserRole
+from ..chat.models import ChatConversation, ChatMessage
+from ..chat.service import aware
+from ..identity.roles import permissions_of
+from ..social_live.contacts import claim
+from ..social_live.models import CapturedPhone, Live, PhoneRegistry
+from ..social_live.security import require_scope
+from . import gateway, service
+
+router = APIRouter(prefix='/api/whatsapp', tags=['WhatsApp mirror'])
+reader = require_scope('wa:read')
+sender = require_scope('wa:send')
+manager = require_scope('wa:manage')
+
+
+def can(who, permission):
+    return permission in permissions_of(who.get('role'))
+
+
+def item(conversation, registry=None):
+    return {'id': conversation.id, 'phone': conversation.phone, 'name': conversation.contact_name,
+            'registry_id': registry.id if registry else None,
+            'advisor_id': registry.advisor_id if registry else conversation.advisor_id,
+            'contact_status': registry.status if registry else None,
+            'unread': conversation.unread, 'last_message_at': aware(conversation.last_message_at)}
+
+
+def message_item(message):
+    return {'id': message.id, 'direction': message.direction, 'author_kind': message.author_kind,
+            'author_id': message.author_id, 'body': message.body, 'status': message.status,
+            'error': message.error, 'at': aware(message.created_at),
+            'sent_at': aware(message.sent_at), 'delivered_at': aware(message.delivered_at),
+            'read_at': aware(message.read_at), 'observed_at': aware(message.observed_at)}
+
+
+async def access(session, conversation_id, who, *, own=False):
+    conversation = await session.get(ChatConversation, conversation_id, with_for_update=own)
+    if not conversation or conversation.channel_id != service.CHANNEL:
+        raise HTTPException(404, 'Conversación no encontrada.')
+    registry = await service.registry_for(session, conversation, lock=own)
+    owner = registry.advisor_id if registry else conversation.advisor_id
+    if own and owner != who['user_id']:
+        raise HTTPException(409, 'Toma el contacto antes de responder. Si tiene otra asesora, debe reasignarlo un supervisor.')
+    if not own and owner not in (None, who['user_id']) and not can(who, 'wa:read_all'):
+        raise HTTPException(403, 'Esta conversación pertenece a otra asesora.')
+    return conversation, registry
+
+
+@router.get('/status')
+async def status(response: Response, who=Depends(reader), session=Depends(get_session)):
+    response.headers['Cache-Control'] = 'no-store'
+    try:
+        result = await gateway.call('/status')
+    except gateway.GatewayUnavailable as exc:
+        return {'state': 'unavailable', 'detail': str(exc)}
+    if not can(who, 'wa:manage'):
+        result.pop('qr', None)
+    heartbeat = await session.get(MonitorState, 'whatsapp-worker')
+    result['sync_at'] = aware(heartbeat.observed_at) if heartbeat else None
+    result['sync_ok'] = bool(heartbeat and (service.now() - aware(heartbeat.observed_at)).total_seconds() < 90)
+    return result
+
+
+@router.post('/connect')
+async def connect(response: Response, who=Depends(manager)):
+    response.headers['Cache-Control'] = 'no-store'
+    try:
+        return await gateway.call('/connect', {})
+    except gateway.GatewayUnavailable as exc:
+        raise HTTPException(503, str(exc)) from exc
+
+
+@router.get('/conversations')
+async def conversations(q: str = Query('', max_length=100), offset: int = Query(0, ge=0),
+                        who=Depends(reader), session=Depends(get_session)):
+    query = select(ChatConversation, PhoneRegistry).outerjoin(
+        PhoneRegistry, PhoneRegistry.phone == ChatConversation.phone).where(
+        ChatConversation.channel_id == service.CHANNEL)
+    owner = case((PhoneRegistry.id.is_not(None), PhoneRegistry.advisor_id), else_=ChatConversation.advisor_id)
+    if not can(who, 'wa:read_all'):
+        query = query.where(or_(owner.is_(None), owner == who['user_id']))
+    if q.strip():
+        query = query.where(or_(ChatConversation.phone.contains(q.strip(), autoescape=True),
+                               ChatConversation.contact_name.ilike('%' + q.replace('%', '').replace('_', '') + '%')))
+    rows = (await session.execute(query.order_by(ChatConversation.last_message_at.desc().nullslast(),
+                                                 ChatConversation.id.desc()).offset(offset).limit(51))).all()
+    return {'items': [item(c, r) for c, r in rows[:50]], 'has_more': len(rows) > 50}
+
+
+class OpenConversation(BaseModel):
+    phone: str = Field(pattern=r'^\+[1-9]\d{7,14}$')
+
+
+@router.post('/conversations')
+async def open_conversation(body: OpenConversation, who=Depends(reader), session=Depends(get_session)):
+    # Phone is explicit; never silently assume a country for international numbers.
+    conversation = await service.conversation_for(session, body.phone)
+    conversation, registry = await access(session, conversation.id, who)
+    await session.commit()
+    return item(conversation, registry)
+
+
+@router.post('/conversations/{conversation_id}/claim')
+async def take(conversation_id: int, who=Depends(sender), session=Depends(get_session)):
+    conversation, registry = await access(session, conversation_id, who)
+    if registry:
+        await claim(session, registry.id, who['user_id'])
+    else:
+        result = await session.execute(update(ChatConversation).where(
+            ChatConversation.id == conversation_id,
+            or_(ChatConversation.advisor_id.is_(None), ChatConversation.advisor_id == who['user_id']))
+            .values(advisor_id=who['user_id']))
+        if result.rowcount != 1:
+            raise HTTPException(409, 'Otra asesora tomó esta conversación.')
+        await session.refresh(conversation)
+    await session.commit()
+    return item(conversation, registry)
+
+
+@router.get('/conversations/{conversation_id}')
+async def detail(conversation_id: int, before: int | None = Query(None, gt=0),
+                 who=Depends(reader), session=Depends(get_session)):
+    conversation, registry = await access(session, conversation_id, who)
+    query = select(ChatMessage).where(ChatMessage.conversation_id == conversation.id)
+    if before:
+        query = query.where(ChatMessage.id < before)
+    messages = list((await session.scalars(query.order_by(ChatMessage.id.desc()).limit(101))).all())
+    names = dict((await session.execute(select(UserRole.user_id, UserRole.display_name).where(
+        UserRole.user_id.in_([m.author_id for m in messages if m.author_id])))).all())
+    first_id = select(ChatMessage.id).where(
+        ChatMessage.conversation_id == conversation.id, ChatMessage.direction == 'out',
+        ChatMessage.sent_at >= CapturedPhone.captured_at).order_by(ChatMessage.sent_at, ChatMessage.id)
+    first_id = first_id.limit(1).correlate(CapturedPhone).scalar_subquery()
+    first_message = aliased(ChatMessage)
+    next_reply = select(func.min(ChatMessage.created_at)).where(
+        ChatMessage.conversation_id == conversation.id, ChatMessage.direction == 'in',
+        ChatMessage.created_at > first_message.sent_at).correlate(first_message).scalar_subquery()
+    # One query for the timeline, not two extra database round trips per LIVE on every poll.
+    appearances = (await session.execute(select(CapturedPhone, Live, first_message, next_reply)
+        .join(Live, Live.id == CapturedPhone.live_id).outerjoin(first_message, first_message.id == first_id)
+        .where(CapturedPhone.phone == conversation.phone).order_by(CapturedPhone.captured_at.desc()).limit(100))).all()
+    lives = []
+    for appearance, live, first, reply in appearances:
+        # First outgoing AFTER this appearance, never a message from an older LIVE.
+        lives.append({'live_id': live.id, 'title': live.title, 'account_id': live.account_id,
+            'tiktoker_id': live.tiktoker_id, 'captured_at': aware(appearance.captured_at),
+            'sent_at': aware(first.sent_at) if first else None,
+            'delivered_at': aware(first.delivered_at) if first else None,
+            'read_at': aware(first.read_at) if first else None, 'next_inbound_at': aware(reply),
+            'seconds_to_send': (aware(first.sent_at) - aware(appearance.captured_at)).total_seconds() if first else None,
+            'author_id': first.author_id if first else None,
+            'source': ('social_pulse' if first.author_kind == 'agent' else 'phone') if first else None})
+    result = {**item(conversation, registry), 'messages': [
+        {**message_item(m), 'author_name': names.get(m.author_id)} for m in reversed(messages[:100])],
+              'has_more': len(messages) > 100, 'lives': lives}
+    # Viewing in Social Pulse does not send a WhatsApp read receipt.
+    return result
+
+
+@router.post('/conversations/{conversation_id}/seen')
+async def seen(conversation_id: int, who=Depends(sender), session=Depends(get_session)):
+    conversation, _ = await access(session, conversation_id, who, own=True)
+    conversation.unread = 0
+    await session.commit()
+    return {'ok': True}
+
+
+class Outgoing(BaseModel):
+    request_id: UUID
+    text: str = Field(min_length=1, max_length=4000)
+
+
+@router.post('/conversations/{conversation_id}/messages', status_code=202)
+async def send(conversation_id: int, body: Outgoing, who=Depends(sender), session=Depends(get_session)):
+    conversation, _ = await access(session, conversation_id, who, own=True)
+    if not body.text.strip():
+        raise HTTPException(422, 'Escribe un mensaje.')
+    message = await service.queue_message(session, conversation, who['user_id'], str(body.request_id), body.text.strip())
+    await session.commit()
+    return message_item(message)

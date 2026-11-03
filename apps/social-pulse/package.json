@@ -13,6 +13,7 @@
     "@clerk/localizations": "^4.23.0",
     "@clerk/react": "^6.17.8",
     "@hookform/resolvers": "^3.6.0",
+    "@xyflow/react": "12.8.4",
     "axios": "^1.7.2",
     "lucide-react": "^1.57.0",
     "react": "18.2.0",

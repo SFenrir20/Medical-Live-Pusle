@@ -86,7 +86,8 @@ async def agent_reminders(session, user_id: str, now=None) -> dict:
         'mine_pending': len(waiting),
         'mine_over_first': sum(w <= first for w in waiting),
         'mine_over_second': sum(w <= second for w in waiting),
-        'unclaimed_waiting': sum(aware_utc(c) <= first for c in unclaimed),
+        'unclaimed_waiting': 0 if settings.auto_assignment
+        else sum(aware_utc(c) <= first for c in unclaimed),
         'first_minutes': settings.reminder_first_minutes,
         'second_minutes': settings.reminder_second_minutes,
         'oldest_minutes': (int((now - min(waiting)).total_seconds() // 60) if waiting else None),

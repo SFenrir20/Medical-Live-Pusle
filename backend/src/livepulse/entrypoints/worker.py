@@ -8,7 +8,10 @@ from sqlalchemy.dialects.postgresql import insert
 
 from ..modules.analytics.models import EventFact, MonitorState
 from ..modules.analytics.processor import handle_event  # noqa: F401
+from ..modules.automation import broadcasts as broadcast_sender
+from ..modules.automation import engine as flow_engine
 from ..modules.broadcasts.models import RawEvent
+from ..modules.social_live import distribution
 from ..modules.social_live.publisher import publish_batch
 from ..modules.social_live.retention import purge_expired
 from ..shared.db import SessionLocal
@@ -40,6 +43,15 @@ async def run_forever(poll_s=2):
         try:
             # Separate step: a bad legacy event must not stop the Social Live reports.
             await publish_batch(SessionLocal)
+            try:
+                await distribution.run(SessionLocal)  # reparto automático entre conectados
+            except Exception:
+                log.exception('Automatic distribution failed; will retry on the next tick')
+            try:
+                await flow_engine.tick(SessionLocal)        # flows whose wait is over
+                await broadcast_sender.tick(SessionLocal)    # next batch of each broadcast
+            except Exception:
+                log.exception('Automation tick failed; will retry on the next tick')
             now = datetime.now(timezone.utc)
             if last_purge is None or now - last_purge >= timedelta(days=1):
                 # Daily: drop comment detail past COMMENTS_RETENTION_DAYS; metrics stay.

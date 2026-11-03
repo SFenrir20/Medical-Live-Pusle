@@ -14,19 +14,23 @@ ROLES = ROLE_CODES
 # download of the contact list: supervisor, marketing head and manager.
 ALERTS = {'alerts:read', 'alerts:review', 'contacts:export'}
 # Ranking of fans (who comments, gives gifts, stays): the managers only, never agents.
-MARKETING = {'screen:marketing', 'read', 'export', 'audience:read', *ALERTS}
+# Automation tools (flows, AI agent, broadcasts): the managers can LOOK (no phones, no chats);
+# only the admin creates, enables and sends.
+MARKETING = {'screen:marketing', 'read', 'export', 'audience:read', 'automation:read', *ALERTS}
 # Attention workflow (validated server-side; none of these can write events):
 CONTACT_WORK = {'contacts:read', 'contacts:claim', 'contacts:update'}
 CONTACT_MANAGE = {*CONTACT_WORK, 'contacts:read_all', 'contacts:assign_any'}
+WA_WORK = {'wa:read', 'wa:send'}
+WA_REVIEW = {'wa:read', 'wa:read_all'}
 PERMISSIONS: dict[str, set[str]] = {
     # Works own/unassigned contacts; never receives the capture (ingest) token.
-    'agente_ventas': {'screen:agent', *CONTACT_WORK},
-    'gerente': set(MARKETING),
-    'jefe_marketing': set(MARKETING),
+    'agente_ventas': {'screen:agent', *CONTACT_WORK, *WA_WORK},
+    'gerente': {*MARKETING, *WA_REVIEW},
+    'jefe_marketing': {*MARKETING, *WA_REVIEW},
     # Both screens plus the operational view, to diagnose failures.
-    'supervisor': {'screen:agent', *MARKETING, 'monitor', *CONTACT_MANAGE},
+    'supervisor': {'screen:agent', *MARKETING, 'monitor', *CONTACT_MANAGE, *WA_WORK, *WA_REVIEW, 'wa:manage'},
     # Break-glass owner (ADMIN_USER_IDS) in case Clerk metadata is misconfigured.
-    'admin': {'screen:agent', *MARKETING, 'monitor', *CONTACT_MANAGE},
+    'admin': {'screen:agent', *MARKETING, 'monitor', *CONTACT_MANAGE, 'automation:manage', *WA_WORK, *WA_REVIEW, 'wa:manage'},
 }
 
 

@@ -278,6 +278,39 @@ class AudienceMember(Base):
     )
 
 
+class AgentPresence(Base):
+    """Who is connected right now. The open app sends a heartbeat every ~20 s; no heartbeat for
+    PRESENCE_OFFLINE_AFTER_S means disconnected. `status` is the agent's own choice (available or
+    paused). `last_assigned_at` orders the round robin: the agent who has gone longest without a
+    contact is next, so people who join or leave never break the rotation."""
+    __tablename__ = 'agent_presence'
+    user_id = Column(String(255), primary_key=True)
+    role = Column(String(24), nullable=False)
+    status = Column(String(12), nullable=False, server_default='available')
+    last_heartbeat_at = Column(DateTime(timezone=True))
+    last_visible_at = Column(DateTime(timezone=True))
+    last_assigned_at = Column(DateTime(timezone=True))
+
+    __table_args__ = (
+        CheckConstraint("status IN ('available','paused')", name='ck_agent_presence_status'),
+    )
+
+
+class AgentSession(Base):
+    """One continuous stretch of being connected. connected = app open and sending heartbeats;
+    active = the same while the tab is visible and the person is interacting."""
+    __tablename__ = 'agent_sessions'
+    id = Column(PK_BIG, primary_key=True, autoincrement=True)
+    user_id = Column(String(255), nullable=False)
+    started_at = Column(DateTime(timezone=True), nullable=False)
+    last_heartbeat_at = Column(DateTime(timezone=True), nullable=False)
+    ended_at = Column(DateTime(timezone=True))
+    connected_seconds = Column(Integer, nullable=False, server_default='0')
+    active_seconds = Column(Integer, nullable=False, server_default='0')
+
+    __table_args__ = (Index('ix_agent_sessions_user_started', 'user_id', 'started_at'),)
+
+
 class ExportAudit(Base):
     """Who downloaded contact data, and how much."""
     __tablename__ = 'export_audit'
