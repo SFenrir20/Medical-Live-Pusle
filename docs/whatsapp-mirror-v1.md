@@ -6,7 +6,8 @@ usan un transporte simulado y no demuestran conectividad con una cuenta real.**
 
 ## Alcance actual
 
-- Un número empresarial, configurado previamente en `WA_EXPECTED_PHONE`, vinculado por QR.
+- Un número empresarial vinculado por QR, detectado automáticamente y guardado en la primera
+  vinculación. No hace falta colocar el teléfono en variables de entorno.
 - Recepción de mensajes individuales desde la vinculación y envío de texto por asesoras.
 - Mensajes de texto enviados desde el celular u otro dispositivo también aparecen, sin inventar
   qué persona los escribió. Grupos, estados y canales quedan fuera de la bandeja.
@@ -31,14 +32,16 @@ En las variables del proyecto Compose, conservar los valores existentes y agrega
 
 ```dotenv
 COMPOSE_PROFILES=live,whatsapp
-WA_EXPECTED_PHONE=+519XXXXXXXX
 WA_GATEWAY_URL=http://wa-gateway:3001
 WA_GATEWAY_TOKEN=<secreto aleatorio de al menos 32 caracteres>
 WA_SESSION_KEY=<64 caracteres hexadecimales>
 ```
 
-Reemplazar el teléfono por el número empresarial real, completo y sin espacios. Generar **dos
-valores diferentes**, ejecutando dos veces este comando localmente en el servidor:
+`WA_EXPECTED_PHONE` es opcional: se puede omitir o dejar vacío. Si se configura, restringe la
+vinculación a ese número E.164. Sin esa variable, se detecta la cuenta al escanear el QR y se
+conserva en el volumen para futuras conexiones.
+
+Generar **dos valores diferentes**, ejecutando dos veces este comando localmente en el servidor:
 
 ```sh
 python3 -c "import secrets; print(secrets.token_hex(32))"
@@ -63,10 +66,11 @@ Mantener una sola instancia de `wa-gateway` y de `wa-worker` por sesión. No esc
 ## Vinculación y verificación real
 
 1. Ingresar a Social Pulse con rol supervisor/admin; abrir **WhatsApp**.
-2. Pulsar **Vincular / reconectar**. En el teléfono del número configurado: WhatsApp →
+2. Pulsar **Vincular / reconectar**. En el teléfono empresarial que quieres vincular: WhatsApp →
    Dispositivos vinculados → Vincular dispositivo → escanear el QR.
-3. Comprobar **Conectado** y que no aparezca una alerta de sincronización atrasada. Vincular
-   otro número provoca cierre de esa sesión, sin importar sus conversaciones al CRM.
+3. Comprobar **Conectado**, el número detectado y que no aparezca una alerta de sincronización
+   atrasada. Después de esta primera vinculación, intentar vincular otro número provoca cierre
+   de esa sesión, sin importar sus conversaciones al CRM.
 4. Desde un teléfono de prueba autorizado, enviar texto al número vinculado. Debe aparecer
    una conversación; tomarla con una asesora y responder desde Social Pulse.
 5. Verificar el texto en el teléfono receptor y las confirmaciones disponibles en Social Pulse.
@@ -123,7 +127,8 @@ teléfono ya existente.
 - Para desvincular, usar **Dispositivos vinculados** en el teléfono y cerrar el dispositivo de
   Social Pulse. El conector detectará el cierre. No borrar el volumen para resolver un timeout:
   contiene las claves que evitan duplicados.
-- No cambiar `WA_EXPECTED_PHONE` sobre un volumen de otro número. V1 no admite cambiar de cuenta
+- El número detectado queda asociado al volumen, aunque `WA_EXPECTED_PHONE` siga vacío.
+  Quitar la variable no desvincula una cuenta ya guardada. V1 no admite cambiar de cuenta
   conservando el mismo canal; requiere una migración explícita de datos y sesión.
 
 Ejemplo de inspección, adaptando nombres de proyecto si se usa Dokploy:

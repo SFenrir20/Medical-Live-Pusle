@@ -4,6 +4,7 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { EventEmitter } from 'node:events';
 import { Store } from '../src/store.js';
 import { Mirror, phoneFromJid } from '../src/mirror.js';
 
@@ -30,11 +31,13 @@ test('Signal auth, queued events survive restart, stay encrypted and reject a wr
     const auth = store.auth(); auth.state.creds.registered = true; auth.save();
     await auth.state.keys.set({ session: { private: { secret: Buffer.from('private-key-material') } } });
     store.event({ body: 'confidential-message-body' });
+    assert.equal(new Mirror(store).bindAccount(business.slice(1) + ':3@s.whatsapp.net'), true);
     store.close();
     assert.equal(readFileSync(path).includes(Buffer.from('confidential-message-body')), false);
     assert.equal(readFileSync(path).includes(Buffer.from('private-key-material')), false);
     store = new Store(path, key);
     assert.equal(store.registered(), true);
+    assert.equal(new Mirror(store).status().phone, business);
     assert.deepEqual((await store.auth().state.keys.get('session', ['private'])).private.secret, Buffer.from('private-key-material'));
     const event = store.events()[0]; assert.equal(event.body, 'confidential-message-body');
     store.ack([event.seq]); assert.equal(store.events().length, 0);
@@ -86,4 +89,56 @@ test('a linked number mismatch cannot emit messages or reuse an existing account
   assert.equal(store.events().length, 0);
   store.set('account', business);
   assert.throws(() => new Mirror(store, '+51933333333'), /another WhatsApp number/);
+});
+
+test('empty number configuration permits QR pairing and learns the linked phone', async t => {
+  const store = new Store(':memory:', key); t.after(() => store.close());
+  const socket = { ev: new EventEmitter(), user: undefined };
+  const mirror = new Mirror(store, '', () => socket);
+  assert.equal(mirror.status().phone, null);
+  mirror.connect();
+  socket.ev.emit('connection.update', { qr: 'test-pairing-code' });
+  await mirror.eventsTail;
+  assert.equal(mirror.state, 'qr');
+  assert.match(mirror.status().qr, /^data:image\/png;base64,/);
+  // No messages or receipts are accepted before a real phone identity is known.
+  await mirror.message({ key: { id: 'early' }, message: { conversation: 'not yet authenticated' } });
+  await mirror.receipt({ id: 'early' }, 'read', new Date().toISOString(), 'observed');
+  assert.equal(store.events().length, 0);
+  socket.user = { id: business.slice(1) + ':4@s.whatsapp.net' };
+  socket.ev.emit('connection.update', { connection: 'open' });
+  await mirror.eventsTail;
+  assert.equal(mirror.state, 'connected');
+  assert.equal(mirror.status().phone, business);
+  assert.equal(mirror.status().qr, null);
+  assert.equal(store.get('account'), business);
+});
+
+test('automatic pairing retains identity across relinks and rejects a different account', async t => {
+  const store = new Store(':memory:', key); t.after(() => store.close());
+  assert.equal(new Mirror(store).bindAccount(business.slice(1) + '@s.whatsapp.net'), true);
+  let logouts = 0;
+  const socket = { ev: new EventEmitter(), user: { id: '51922222222@s.whatsapp.net' },
+    logout: async () => { logouts++; } };
+  const mirror = new Mirror(store, undefined, () => socket);
+  assert.equal(mirror.status().phone, business);
+  mirror.connect();
+  socket.ev.emit('connection.update', { connection: 'open' });
+  await mirror.eventsTail;
+  assert.equal(mirror.state, 'wrong_number');
+  assert.equal(logouts, 1);
+  assert.equal(store.get('account'), business);
+  assert.equal(mirror.bindAccount(business.slice(1) + ':8@s.whatsapp.net'), true);
+});
+
+test('optional expected number still validates and unidentified accounts cannot be bound', t => {
+  const store = new Store(':memory:', key); t.after(() => store.close());
+  const auto = new Mirror(store, '  ');
+  for (const jid of [undefined, '123456789@lid', '123456789@g.us']) assert.equal(auto.bindAccount(jid), false);
+  assert.equal(store.get('account'), null);
+  assert.throws(() => new Mirror(store, 'invalid'), /E.164/);
+  const restricted = new Mirror(store, business);
+  assert.equal(restricted.bindAccount('51922222222@s.whatsapp.net'), false);
+  assert.equal(store.get('account'), null);
+  assert.equal(restricted.bindAccount(business.slice(1) + '@s.whatsapp.net'), true);
 });

@@ -14,16 +14,29 @@ const timestamp = value => {
   return seconds > 0 && Number.isFinite(seconds) ? new Date(seconds * 1000).toISOString() : null;
 };
 export class Mirror {
-  constructor(store, expectedPhone) {
-    if (!/^\+[1-9]\d{7,14}$/.test(expectedPhone || '')) throw new Error('WA_EXPECTED_PHONE must be E.164');
-    this.store = store; this.expectedPhone = expectedPhone;
+  constructor(store, expectedPhone, socketFactory = makeWASocket) {
+    expectedPhone = expectedPhone?.trim() || null;
+    if (expectedPhone && !/^\+[1-9]\d{7,14}$/.test(expectedPhone)) throw new Error('WA_EXPECTED_PHONE must be E.164 when set');
+    this.store = store; this.socketFactory = socketFactory;
     const previous = store.get('account');
-    if (previous && previous !== expectedPhone) throw new Error('This volume belongs to another WhatsApp number');
+    if (previous && expectedPhone && previous !== expectedPhone) throw new Error('This volume belongs to another WhatsApp number');
+    this.expectedPhone = previous || expectedPhone;
     this.state = 'disconnected'; this.qr = null; this.socket = null;
     this.eventsTail = Promise.resolve(); this.sendTail = Promise.resolve();
     this.retryTimer = null; this.attempt = 0;
   }
   status() { return { state: this.state, phone: this.expectedPhone, qr: this.qr, unresolved: this.store.pendingCount() }; }
+  bindAccount(jid) {
+    const phone = phoneFromJid(jid);
+    if (!phone || (this.expectedPhone && phone !== this.expectedPhone)) return false;
+    // The first successful QR pairing owns this volume. Relinking must keep that identity.
+    this.store.set('account', phone);
+    this.expectedPhone = phone;
+    return true;
+  }
+  matchesAccount() {
+    return !!this.expectedPhone && phoneFromJid(this.socket?.user?.id) === this.expectedPhone;
+  }
   handler(fn) {
     return data => {
       this.eventsTail = this.eventsTail.then(() => fn(data)).catch(() => {
@@ -41,7 +54,7 @@ export class Mirror {
     clearTimeout(this.retryTimer);
     this.state = 'connecting'; this.qr = null;
     const auth = this.store.auth();
-    const socket = makeWASocket({ auth: auth.state, logger: pino({ level: 'silent' }),
+    const socket = this.socketFactory({ auth: auth.state, logger: pino({ level: 'silent' }),
       browser: ['Medical Social Pulse', 'Chrome', '1.0.0'], markOnlineOnConnect: false,
       syncFullHistory: false, shouldSyncHistoryMessage: () => false,
       getMessage: async key => this.store.get(`message:${key.id}`),
@@ -52,11 +65,10 @@ export class Mirror {
       if (socket !== this.socket) return;
       if (update.qr) { this.state = 'qr'; this.qr = await QRCode.toDataURL(update.qr); }
       if (update.connection === 'open') {
-        if (phoneFromJid(socket.user?.id) !== this.expectedPhone) {
+        if (!this.bindAccount(socket.user?.id)) {
           this.state = 'wrong_number'; this.qr = null;
           await socket.logout(); return;
         }
-        this.store.set('account', this.expectedPhone);
         this.state = 'connected'; this.qr = null; this.attempt = 0;
         await this.retryPending();
       }
@@ -102,7 +114,7 @@ export class Mirror {
     }
   }
   async message(message) {
-    if (phoneFromJid(this.socket?.user?.id) !== this.expectedPhone) return;
+    if (!this.matchesAccount()) return;
     const { key } = message;
     if (!key.id || !message.message) return;
     const content = normalizeMessageContent(message.message), type = getContentType(content);
@@ -130,7 +142,7 @@ export class Mirror {
     });
   }
   async receipt(key, status, at, clock) {
-    if (phoneFromJid(this.socket?.user?.id) !== this.expectedPhone) return;
+    if (!this.matchesAccount()) return;
     const phone = await this.resolve(key);
     if (!at) return;
     const pendingKey = `r:${key.id}:${status}`;
@@ -156,7 +168,7 @@ export class Mirror {
       if (previous.phone !== phone || previous.text !== text) throw new Error('request_conflict');
       return previous; // Never re-send an ambiguous attempt after a crash or timeout.
     }
-    if (this.state !== 'connected') return { state: 'offline' };
+    if (this.state !== 'connected' || !this.matchesAccount()) return { state: 'offline' };
     const external_id = generateMessageIDV2(this.socket.user.id);
     const intent = { request_id, phone, text, external_id, state: 'unknown' };
     this.store.transaction(() => {
