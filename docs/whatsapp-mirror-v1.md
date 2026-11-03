@@ -1,0 +1,159 @@
+# WhatsApp mirror V1 — operación
+
+Implementación local: conector Node/Baileys, worker persistente, API con permisos Clerk y pantalla
+`/whatsapp`. **La prueba real requiere desplegar y vincular el teléfono; las pruebas automáticas
+usan un transporte simulado y no demuestran conectividad con una cuenta real.**
+
+## Alcance actual
+
+- Un número empresarial, configurado previamente en `WA_EXPECTED_PHONE`, vinculado por QR.
+- Recepción de mensajes individuales desde la vinculación y envío de texto por asesoras.
+- Mensajes de texto enviados desde el celular u otro dispositivo también aparecen, sin inventar
+  qué persona los escribió. Grupos, estados y canales quedan fuera de la bandeja.
+- Los adjuntos se identifican por tipo (y su descripción cuando existe), pero su archivo aún debe
+  consultarse en el teléfono. No se descargan ni envían audios, fotos o documentos en esta V1.
+- No se importa el historial completo anterior a la vinculación. No es una copia de seguridad
+  del WhatsApp ni una garantía de recuperar mensajes de períodos sin conexión.
+- Contacto común por número E.164, incluso si WhatsApp llegó antes de la captura TikTok. Las
+  apariciones en distintas cuentas/LIVE permanecen separadas dentro del historial del contacto.
+- Roles: ventas ve sus conversaciones y las libres; debe tomar un contacto antes de enviar.
+  Gerencia/jefatura revisan todas, sin enviar. Supervisor/admin revisan todas y gestionan el QR;
+  para enviar también deben ser propietarios del contacto (reasignación desde el CRM).
+- Los bots, agentes LLM y difusiones existentes permanecen desconectados del transporte real.
+  No se necesitan credenciales de WhatsApp Cloud API ni permisos de TikTok/Meta para este conector.
+
+No es una integración oficial de Meta. Una actualización de WhatsApp puede interrumpirla;
+el código no garantiza ausencia de restricciones de cuenta.
+
+## Configuración en el VPS / Dokploy
+
+En las variables del proyecto Compose, conservar los valores existentes y agregar:
+
+```dotenv
+COMPOSE_PROFILES=live,whatsapp
+WA_EXPECTED_PHONE=+519XXXXXXXX
+WA_GATEWAY_URL=http://wa-gateway:3001
+WA_GATEWAY_TOKEN=<secreto aleatorio de al menos 32 caracteres>
+WA_SESSION_KEY=<64 caracteres hexadecimales>
+```
+
+Reemplazar el teléfono por el número empresarial real, completo y sin espacios. Generar **dos
+valores diferentes**, ejecutando dos veces este comando localmente en el servidor:
+
+```sh
+python3 -c "import secrets; print(secrets.token_hex(32))"
+```
+
+Guardar los secretos únicamente en la configuración del servidor; no en Git ni variables VITE.
+`WA_GATEWAY_TOKEN` debe coincidir en API, gateway y worker. `WA_SESSION_KEY` debe permanecer estable:
+el conector rechaza un volumen cifrado con otra clave. Respaldar la clave separada del volumen.
+
+Construir/desplegar el Compose actualizado. La API ejecuta Alembic hasta `0015`; depende de las
+migraciones previas `0013` (presencia) y `0014` (chat/automatización). No desplegar solo el frontend.
+Si se usa la CLI en lugar de Dokploy (desde la raíz del repositorio, con `.env` configurado):
+
+```sh
+docker compose --env-file .env -f infra/compose.yaml --profile live --profile whatsapp up -d --build
+```
+
+El dominio sigue apuntando a `web:80`. **No publicar el puerto 3001**. El volumen `wa-session`
+conserva la sesión, eventos pendientes y claves de idempotencia entre recreaciones del contenedor.
+Mantener una sola instancia de `wa-gateway` y de `wa-worker` por sesión. No escalar estos servicios.
+
+## Vinculación y verificación real
+
+1. Ingresar a Social Pulse con rol supervisor/admin; abrir **WhatsApp**.
+2. Pulsar **Vincular / reconectar**. En el teléfono del número configurado: WhatsApp →
+   Dispositivos vinculados → Vincular dispositivo → escanear el QR.
+3. Comprobar **Conectado** y que no aparezca una alerta de sincronización atrasada. Vincular
+   otro número provoca cierre de esa sesión, sin importar sus conversaciones al CRM.
+4. Desde un teléfono de prueba autorizado, enviar texto al número vinculado. Debe aparecer
+   una conversación; tomarla con una asesora y responder desde Social Pulse.
+5. Verificar el texto en el teléfono receptor y las confirmaciones disponibles en Social Pulse.
+   Repetir escribiendo desde el celular empresarial: aparecerá «Desde teléfono u otro dispositivo».
+6. Capturar ese mismo número en un LIVE de prueba: abrir **Abrir WhatsApp** junto al teléfono y
+   verificar las apariciones, cuenta, responsable y tiempo hasta el primer envío posterior.
+7. Reiniciar el gateway: debe recuperar la sesión sin QR. Cortar y restaurar la conexión durante
+   un envío: revisar su estado antes de redactar otro; no debe duplicarse automáticamente.
+8. Probar otra asesora: no debe acceder al contacto ya asignado. Comprobar acceso de revisión
+   de jefatura y ausencia del QR para roles sin administración de WhatsApp.
+
+Estos pasos requieren el teléfono y el VPS; no se ejecutaron desde el entorno de desarrollo.
+
+## Estados y evidencia
+
+| Estado | Qué acredita |
+|---|---|
+| En cola | El servidor aceptó la solicitud de la asesora. Aún no salió por WhatsApp. |
+| Confirmando envío | Se inició el intento; se consulta el mismo identificador si hay timeout. |
+| Enviado | El transporte confirmó la presentación del mensaje o llegó su eco. No prueba entrega. |
+| Entregado | Se observó la confirmación de entrega de WhatsApp. |
+| Leído | Se recibió una confirmación de lectura; puede no estar disponible. |
+| Envío sin confirmar | Hubo un resultado ambiguo. No se reenvía automáticamente. Revisar el teléfono. |
+| No enviado | Se canceló antes de transmitir, por ejemplo porque cambió la asesora asignada. |
+
+Cada envío tiene un UUID estable. Gateway y backend conservan la identidad durante reintentos.
+Los eventos se confirman al gateway **después** de guardar en PostgreSQL. Las confirmaciones
+pueden llegar antes del mensaje; se conservan y se aplican después, sin retroceder de leído a enviado.
+
+Al confirmarse un envío real de la asesora propietaria, un contacto `new` pasa a `contacted`,
+con la fecha de envío y auditoría `whatsapp_sent`. Un mensaje en cola o fallido no lo cambia.
+Un envío escrito en el teléfono no se atribuye a una asesora ni cambia automáticamente su estado.
+El estado CRM también puede haberse marcado manualmente: **validar el mensaje y sus confirmaciones**,
+no solamente la etiqueta «contactado». «Leído» tampoco equivale a respuesta ni cita confirmada.
+
+Las horas se guardan en UTC y se muestran en Lima. Cuando WhatsApp proporciona una fecha de
+entrega/lectura, se conserva; si solo da un cambio de estado, se registra cuándo fue observado.
+Por ello no se promete precisión exacta del instante de lectura tras una desconexión.
+
+Para cada captura LIVE se muestra el **primer envío posterior a esa captura**. No se usan mensajes
+anteriores para afirmar que el nuevo LIVE fue atendido. Esta correlación temporal no demuestra
+que el mensaje se refería a ese LIVE; si hubo dos apariciones antes de responder, el mismo envío
+puede ser posterior a ambas. Las apariciones se muestran por separado, sin contar como nuevo un
+teléfono ya existente.
+
+## Diagnóstico y recuperación
+
+- `Conector no disponible`: comprobar variables y servicio `wa-gateway`.
+- Conectado pero sincronización atrasada: comprobar `wa-worker`, migración y acceso a PostgreSQL.
+- `Requiere nueva vinculación`: pulsar vincular y escanear de nuevo. El historial en PostgreSQL
+  permanece; solo se renueva la autenticación del dispositivo.
+- Pendientes de identificar: WhatsApp envió un identificador LID sin teléfono. Se guardan cifrados
+  y se reintentan cuando llega la correspondencia. No se interpreta un LID numérico como teléfono.
+- Para desvincular, usar **Dispositivos vinculados** en el teléfono y cerrar el dispositivo de
+  Social Pulse. El conector detectará el cierre. No borrar el volumen para resolver un timeout:
+  contiene las claves que evitan duplicados.
+- No cambiar `WA_EXPECTED_PHONE` sobre un volumen de otro número. V1 no admite cambiar de cuenta
+  conservando el mismo canal; requiere una migración explícita de datos y sesión.
+
+Ejemplo de inspección, adaptando nombres de proyecto si se usa Dokploy:
+
+```sh
+docker compose --env-file .env -f infra/compose.yaml --profile whatsapp logs --tail 100 wa-gateway wa-worker
+```
+
+Las credenciales Signal, eventos pendientes y registros de envío del gateway se cifran por valor
+con AES-256-GCM. El volumen SQLite no se cifra como dispositivo completo. Los mensajes del CRM
+se guardan en PostgreSQL, bajo la misma protección y respaldos que el resto del CRM. Esta V1 no
+purga chats automáticamente; la retención de comentarios TikTok no borra mensajes WhatsApp.
+
+## Comprobaciones de desarrollo
+
+```sh
+cd services/wa-gateway
+npm ci --ignore-scripts
+npm test
+```
+
+```sh
+cd backend
+python -m pytest tests/social_live/test_whatsapp.py -q
+```
+
+```sh
+cd apps/social-pulse
+pnpm build
+```
+
+Pruebas: cifrado/reinicio, clave incorrecta, LID, cuenta equivocada, envío idempotente/ambiguo,
+deduplicación, permisos/asignación, eventos fuera de orden, correlación por LIVE y QR restringido.

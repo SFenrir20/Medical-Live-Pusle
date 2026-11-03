@@ -17,6 +17,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import func, or_, select, union_all
 
+from ...shared.config import settings
 from ...shared.db import get_session
 from ..analytics.models import UserRole
 from ..identity.roles import permissions_of
@@ -107,8 +108,12 @@ async def inbox(scope: Literal['all', 'mine', 'unassigned'] = 'all',
     lead_ids = select(PhoneRegistry.id.label('row_id'),
                       PhoneRegistry.first_captured_at.label('at'))
     if not allowed(who, 'contacts:read_all'):
-        lead_ids = lead_ids.where(or_(PhoneRegistry.advisor_id.is_(None),
-                                      PhoneRegistry.advisor_id == me))
+        if settings.auto_assignment:
+            # Contacts are pushed to connected agents; the unassigned pool is not browsable.
+            lead_ids = lead_ids.where(PhoneRegistry.advisor_id == me)
+        else:
+            lead_ids = lead_ids.where(or_(PhoneRegistry.advisor_id.is_(None),
+                                          PhoneRegistry.advisor_id == me))
     if scope == 'mine':
         lead_ids = lead_ids.where(PhoneRegistry.advisor_id == me)
     elif scope == 'unassigned':
@@ -253,6 +258,7 @@ async def history(contact_id: int, who=Depends(reader), session=Depends(get_sess
         ContactAudit.registry_id == contact_id).order_by(ContactAudit.created_at,
                                                          ContactAudit.id))).all()
     names = await names_of(session, {r.actor for r in rows})
+    names['system:auto'] = 'Reparto automático'
     return {'items': [{'actor': r.actor, 'actor_name': names.get(r.actor, r.actor),
                        'action': r.action, 'previous': r.previous, 'value': r.value,
                        'at': queries.iso(r.created_at)} for r in rows]}

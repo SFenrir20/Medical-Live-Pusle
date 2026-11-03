@@ -1,0 +1,11 @@
+packages:
+  - '.'
+# Four d3 packages (transitive, from @xyflow/react) published a patch release hours before this
+# was added. They look legitimate (signed provenance, no install scripts) but the supply-chain
+# policy rightly blocks releases under a day old, so they are pinned to the previous versions.
+# Remove this block when the policy lets the latest ones through.
+overrides:
+  d3-color: 3.1.0
+  d3-dispatch: 3.0.1
+  d3-ease: 3.0.1
+  d3-timer: 3.0.1

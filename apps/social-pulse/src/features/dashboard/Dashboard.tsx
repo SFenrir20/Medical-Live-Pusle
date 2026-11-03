@@ -26,6 +26,7 @@ import {
   Sparkles,
   TrendingUp,
   Trophy,
+  Workflow,
   UserPlus,
   Users,
   X,
@@ -35,20 +36,38 @@ import { useAuth } from "@/context/AuthContext";
 import { downloadLiveComments, LiveApi } from "@/features/workspace/api";
 import { BrandLogo } from "@/features/auth/BrandLogo";
 import { AudiencePanel } from "@/features/audience/AudiencePanel";
+import { AutomationPanel } from "@/features/automation/AutomationPanel";
 import { AlertsPanel } from "@/features/notifications/AlertsPanel";
 import { NotificationBell } from "@/features/notifications/NotificationBell";
+import { PresenceControl } from "@/features/presence/PresenceControl";
+import { usePresence, useTeamPresence } from "@/features/presence/usePresence";
 import { useBoard } from "@/features/workspace/useBoard";
 import { MessageStatus, SocialMessage, useWorkspace } from "@/features/workspace/useWorkspace";
 
 type View = "Pulso" | "Bandeja" | "Contactos" | "Ajustes";
-type MarketingView = "Resumen" | "Equipo" | "Transmisiones" | "Audiencia" | "Alertas";
+type MarketingView =
+  | "Resumen"
+  | "Equipo"
+  | "Transmisiones"
+  | "Audiencia"
+  | "Automatización"
+  | "Alertas";
 const MARKETING_VIEWS: MarketingView[] = [
   "Resumen",
   "Equipo",
   "Transmisiones",
   "Audiencia",
+  "Automatización",
   "Alertas",
 ];
+const MARKETING_ICONS: Record<MarketingView, typeof Activity> = {
+  Resumen: Activity,
+  Equipo: Users,
+  Transmisiones: Music2,
+  Audiencia: Trophy,
+  Automatización: Workflow,
+  Alertas: Bell,
+};
 
 const ROLE_LABEL: Record<string, string> = {
   agente_ventas: "Agente call center",
@@ -152,6 +171,12 @@ function useNow(everyMs = 1000) {
     return () => window.clearInterval(timer);
   }, [everyMs]);
   return now;
+}
+
+function duration(seconds: number) {
+  if (seconds < 60) return seconds > 0 ? "<1 min" : "—";
+  const minutes = Math.round(seconds / 60);
+  return minutes < 60 ? `${minutes} min` : `${Math.floor(minutes / 60)} h ${minutes % 60} min`;
 }
 
 function Logo() {
@@ -358,6 +383,10 @@ function MarketingDashboard({ initialView = "Resumen" }: { initialView?: Marketi
   const { user, logout } = useAuth();
   const [view, setView] = useState<MarketingView>(initialView);
   const { summary, lives, error: boardError } = useBoard(true);
+  const teamPresence = useTeamPresence(true);
+  const views = MARKETING_VIEWS.filter(
+    (item) => item !== "Automatización" || (user?.permissions ?? []).includes("automation:read"),
+  );
   const now = useNow();
   const unassigned = { length: summary?.unassigned ?? 0 };
   const teamAgents = (summary?.agents ?? []).map((agent) => agent.name);
@@ -381,7 +410,7 @@ function MarketingDashboard({ initialView = "Resumen" }: { initialView?: Marketi
         <div className="mx-auto flex h-[68px] max-w-[1400px] items-center justify-between px-4 sm:px-6">
           <Logo />
           <nav className="hidden items-center gap-1 lg:flex">
-            {MARKETING_VIEWS.map((item) => (
+            {views.map((item) => (
               <button
                 type="button"
                 key={item}
@@ -399,6 +428,7 @@ function MarketingDashboard({ initialView = "Resumen" }: { initialView?: Marketi
             <a href="/integraciones/tiktok" className="rounded-xl px-3 py-2 text-xs font-semibold text-primary">
               Conectar TikTok
             </a>
+            {user?.permissions.includes("wa:read") && <a href="/whatsapp" className="rounded-xl px-3 py-2 text-xs font-semibold text-primary">WhatsApp</a>}
             <span className="hidden rounded-full bg-violet-50 px-3 py-1.5 text-[11px] font-bold text-violet-700 sm:inline-flex">
               {ROLE_LABEL[user?.role ?? ""] ?? "Marketing"}
             </span>
@@ -451,7 +481,7 @@ function MarketingDashboard({ initialView = "Resumen" }: { initialView?: Marketi
         )}
 
         <div className="mt-6 flex gap-2 overflow-x-auto lg:hidden">
-          {MARKETING_VIEWS.map((item) => (
+          {views.map((item) => (
             <button
               type="button"
               key={item}
@@ -564,46 +594,109 @@ function MarketingDashboard({ initialView = "Resumen" }: { initialView?: Marketi
 
         {view === "Equipo" && (
           <section className="mt-6">
-            <div>
-              <h2 className="text-xl font-bold">Disponibilidad del equipo</h2>
-              <p className="mt-1 text-sm text-muted">
-                Consulta quién tiene cada seguimiento sin intervenir en la gestión del agente.
-              </p>
+            <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-end">
+              <div>
+                <h2 className="text-xl font-bold">Disponibilidad del equipo</h2>
+                <p className="mt-1 max-w-2xl text-sm text-muted">
+                  {teamPresence?.auto_assignment === false
+                    ? "Quién tiene cada seguimiento. El reparto automático está apagado: los agentes toman sus contactos."
+                    : "Los contactos nuevos se reparten en rotación entre quienes están conectados (verde). Quien se desconecta o pausa deja sus pendientes a los demás."}
+                </p>
+              </div>
+              {teamPresence && (
+                <div className="flex gap-2 text-xs font-bold">
+                  <span className="rounded-full bg-emerald-50 px-3 py-1.5 text-emerald-700">
+                    {teamPresence.online} conectados
+                  </span>
+                  <span
+                    className={`rounded-full px-3 py-1.5 ${
+                      teamPresence.pool_waiting ? "bg-amber-50 text-amber-700" : "bg-slate-100 text-slate-600"
+                    }`}
+                  >
+                    {teamPresence.pool_waiting} esperando agente
+                  </span>
+                </div>
+              )}
             </div>
-            <div className="mt-5 grid gap-4 md:grid-cols-3">
-              {teamAgents.map((agent) => {
-                const assigned = { length: statsOf(agent)?.assigned ?? 0 };
-                const pending = { length: statsOf(agent)?.pending ?? 0 };
+            <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+              {(teamPresence?.items ?? []).map((agent) => {
+                const dot = { green: "bg-emerald-500", amber: "bg-amber-500", red: "bg-red-500" }[
+                  agent.light
+                ];
+                const text = { online: "Conectado", paused: "En pausa", offline: "Desconectado" }[
+                  agent.state
+                ];
                 return (
-                  <article key={agent} className="rounded-2xl border border-line bg-white p-5">
+                  <article key={agent.id} className="rounded-2xl border border-line bg-white p-5">
                     <div className="flex items-center justify-between">
-                      <span className="grid size-11 place-items-center rounded-xl bg-primary-soft font-bold text-primary">
-                        {agent.slice(0, 2).toUpperCase()}
+                      <span className="relative grid size-11 place-items-center rounded-xl bg-primary-soft font-bold text-primary">
+                        {agent.name.slice(0, 2).toUpperCase()}
+                        <span
+                          className={`absolute -right-1 -top-1 size-3.5 rounded-full border-2 border-white ${dot}`}
+                        />
                       </span>
                       <span className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-bold text-slate-600">
-                        Agente
+                        {text}
                       </span>
                     </div>
-                    <h3 className="mt-4 font-bold">{agent}</h3>
-                    <p className="mt-1 text-xs text-muted">Agente call center</p>
+                    <h3 className="mt-4 font-bold">{agent.name}</h3>
+                    <p className="mt-1 text-xs text-muted">
+                      {agent.state === "offline" && agent.last_seen_at
+                        ? `Última vez ${lima(agent.last_seen_at)}`
+                        : agent.receives
+                          ? "Recibiendo contactos"
+                          : "Agente call center"}
+                    </p>
                     <div className="mt-5 grid grid-cols-2 gap-2">
-                      <div className="rounded-xl bg-slate-50 p-3">
-                        <strong className="block text-lg">{assigned.length}</strong>
-                        <span className="text-[11px] text-muted">Asignados</span>
-                      </div>
                       <div className="rounded-xl bg-amber-50 p-3">
-                        <strong className="block text-lg text-amber-700">{pending.length}</strong>
+                        <strong className="block text-lg text-amber-700">{agent.pending}</strong>
                         <span className="text-[11px] text-muted">Pendientes</span>
                       </div>
+                      <div className="rounded-xl bg-slate-50 p-3">
+                        <strong className="block text-lg">{agent.worked}</strong>
+                        <span className="text-[11px] text-muted">En gestión</span>
+                      </div>
                     </div>
+                    <dl className="mt-4 space-y-1.5 text-xs">
+                      <div className="flex justify-between">
+                        <dt className="text-muted">Conectado hoy</dt>
+                        <dd className="font-semibold">{duration(agent.today.connected_seconds)}</dd>
+                      </div>
+                      <div className="flex justify-between">
+                        <dt className="text-muted">Mirando el CRM hoy</dt>
+                        <dd className="font-semibold">{duration(agent.today.active_seconds)}</dd>
+                      </div>
+                      <div className="flex justify-between">
+                        <dt className="text-muted">Últimos 7 días</dt>
+                        <dd className="font-semibold">
+                          {duration(agent.week.connected_seconds)} · {agent.week.sessions} sesiones
+                        </dd>
+                      </div>
+                    </dl>
                   </article>
                 );
               })}
+              {teamPresence && !teamPresence.items.length && (
+                <p className="rounded-2xl border border-dashed border-slate-300 bg-white p-6 text-sm text-muted md:col-span-3">
+                  Todavía no hay agentes de ventas registrados. Aparecerán cuando inicien sesión.
+                </p>
+              )}
+              {!teamPresence &&
+                teamAgents.map((agent) => (
+                  <article key={agent} className="rounded-2xl border border-line bg-white p-5">
+                    <h3 className="font-bold">{agent}</h3>
+                    <p className="mt-1 text-xs text-muted">
+                      {statsOf(agent)?.pending ?? 0} pendientes · {statsOf(agent)?.assigned ?? 0} asignados
+                    </p>
+                  </article>
+                ))}
             </div>
           </section>
         )}
 
         {view === "Audiencia" && <AudiencePanel lives={lives} />}
+
+        {view === "Automatización" && <AutomationPanel />}
 
         {view === "Alertas" && <AlertsPanel />}
 
@@ -660,8 +753,8 @@ function MarketingDashboard({ initialView = "Resumen" }: { initialView?: Marketi
 
       <nav className="sticky bottom-0 z-30 border-t border-line bg-white px-3 py-2 lg:hidden">
         <div className="mx-auto flex max-w-sm justify-around">
-          {MARKETING_VIEWS.map((item, index) => {
-            const Icon = [Activity, Users, Music2, Trophy, Bell][index];
+          {views.map((item) => {
+            const Icon = MARKETING_ICONS[item];
             return (
               <button
                 type="button"
@@ -694,6 +787,9 @@ function AgentDashboard({ onOpenMarketing }: { onOpenMarketing?: () => void }) {
   const permissions = user?.permissions ?? [];
   const canHistory = permissions.includes("read");
   const board = useBoard(canHistory);
+  // Only sales agents receive contacts; supervisors using this screen are not "on shift".
+  const onShift = user?.role === "agente_ventas";
+  const { presence, failed: presenceFailed, setStatus: setPresenceStatus } = usePresence(onShift);
   const now = useNow();
   const activeLive = board.lives.find((live) => live.status === "live");
   const [settings, setSettings] = useState({
@@ -982,6 +1078,10 @@ function AgentDashboard({ onOpenMarketing }: { onOpenMarketing?: () => void }) {
                   ) : (
                     <span className="text-slate-400">No detectado</span>
                   )}
+                  {item.phone && user?.permissions.includes("wa:read") && <a
+                    href={`/whatsapp?phone=${encodeURIComponent(item.phone)}`}
+                    onClick={event => event.stopPropagation()}
+                    className="mt-2 block text-xs font-semibold text-primary">Abrir WhatsApp</a>}
                 </td>
                 <td className="px-4 py-4">
                   <TypeBadge type={item.type} />
@@ -1097,6 +1197,14 @@ function AgentDashboard({ onOpenMarketing }: { onOpenMarketing?: () => void }) {
             ))}
           </nav>
           <div className="relative flex items-center gap-2">
+            {user?.permissions.includes("wa:read") && <a href="/whatsapp" className="rounded-xl px-3 py-2 text-xs font-semibold text-primary">WhatsApp</a>}
+            {onShift && (
+              <PresenceControl
+                presence={presence}
+                failed={presenceFailed}
+                onChange={setPresenceStatus}
+              />
+            )}
             <NotificationBell onOpenInbox={showPriority} onOpenAlerts={onOpenMarketing} />
             <button
               type="button"

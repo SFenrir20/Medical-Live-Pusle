@@ -195,6 +195,41 @@ minúsculas y sin `@`). Se alimenta en la misma ingestión que las métricas, as
 cuenta una vez, y se borra con los comentarios (`COMMENTS_RETENTION_DAYS`). La migración `0011`
 reconstruye el historial desde `raw_events` para los lives ya ocurridos dentro de esa ventana.
 
+## Reparto automático y presencia de agentes
+
+Los contactos nuevos ya no esperan en un montón común para que cada agente tome los suyos: el
+sistema los **empuja, en rotación, a los agentes conectados**.
+
+- **Conectado** = la app abierta del agente envía un latido cada ~20 s (`POST /api/presence/heartbeat`).
+  Sin latido durante `PRESENCE_OFFLINE_AFTER_S` (60 s) está desconectado (luz roja). También puede
+  **pausar** (ámbar): sigue con sesión pero no recibe. Luz verde = conectado y recibiendo.
+  Solo el rol `agente_ventas` recibe reparto.
+- **Rotación**: el siguiente contacto va al conectado que lleva más tiempo sin recibir uno
+  (`last_assigned_at`). Quien entra recibe el siguiente; quien sale simplemente deja la rotación.
+  Con un agente, todo va a él; con dos, alternan; con tres, 1-2-3, etc. Nada se reequilibra al
+  entrar alguien: solo fluyen los contactos nuevos.
+- **Los pendientes no esperan a nadie**: lo que un agente no ha gestionado (estado `new`) se
+  reparte entre los conectados cuando ella se pausa (al instante) o se desconecta (tras
+  `PRESENCE_OFFLINE_AFTER_S` + `REDISTRIBUTE_GRACE_S`, para que recargar la página o un corte
+  breve no los mueva). Si no hay nadie conectado vuelven al montón y salen en cuanto alguien se
+  conecta, los más antiguos primero. Lo que ya está en gestión (contactado, calificado,
+  descartado) **se queda** con su agente.
+- **Bandeja del agente**: con el reparto activo ve solo lo que se le asignó. Supervisor, marketing y
+  gerente ven el montón y el reparto.
+- **Auditoría**: cada movimiento queda en `contact_audit` con el actor `system:auto`
+  (`auto_assign`, `auto_reassign`, `auto_release`). Los movimientos son `UPDATE` condicionados, así
+  que dos procesos nunca asignan dos veces el mismo contacto.
+- **Tiempo en el CRM**: los mismos latidos miden por sesión el tiempo **conectado** (app abierta) y
+  **activo** (pestaña visible y con interacción en los últimos 2 min). `GET /api/presence/team`
+  (supervisor, marketing, gerente) devuelve luz, pendientes, en gestión, tiempo de hoy y de 7
+  días por agente, y cuántos contactos esperan agente. Sin teléfonos ni comentarios.
+
+El worker corre el reparto en cada ciclo (`distribution.run`). Variables: `AUTO_ASSIGNMENT`
+(`true` por defecto; `false` vuelve al modo anterior, en que los agentes toman los contactos libres),
+`PRESENCE_OFFLINE_AFTER_S`, `REDISTRIBUTE_GRACE_S`. La migración `0013` agrega `agent_presence` y
+`agent_sessions`. Un contacto que un supervisor asignó a mano a un agente que luego se desconecta
+también se redistribuye mientras siga sin gestionarse.
+
 ## Ingestión — `/api/social-live` (token `ingest`)
 
 `POST /accounts`, `POST /tiktokers`, `POST /lives`, `POST /lives/{id}/events` (uno o
@@ -294,7 +329,7 @@ las transmisiones, marca como publicados los eventos ya plegados y mueve el anti
    origen de Social Pulse), `VITE_CLERK_PUBLISHABLE_KEY`, `WEB_PORT`, `CORS_ORIGINS` si aplica.
 3. Reconstruir y desplegar `api`, `worker`, `monitor` y `social` (no basta reiniciar). La API
    aplica `alembic upgrade head` al iniciar.
-4. `python -m alembic current` debe mostrar `0011 (head)` (carga a las 6 TikTokers, crea las tablas de alertas, las columnas de totales de audiencia y `audience_members`, que se rellena con el historial de `raw_events`).
+4. `python -m alembic current` debe mostrar `0013 (head)` (carga a las 6 TikTokers, crea las tablas de alertas, las columnas de totales de audiencia y `audience_members`, que se rellena con el historial de `raw_events`).
 5. Esperar el primer ciclo del worker (convierte el historial) y revisar logs. Los LIVE que ya
    estaban al aire reciben su título en ≤5 min tras reiniciar `monitor`; los LIVE anteriores
    (sin título guardado) siguen «Sin asignar» hasta asignarlos con `PATCH` si hace falta.
