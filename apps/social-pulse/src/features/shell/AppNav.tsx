@@ -1,3 +1,4 @@
+import { PrimaryNav } from "./PrimaryNav";
 import { LogOut } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { BrandLogo } from "@/features/auth/BrandLogo";
@@ -20,35 +21,25 @@ export function AppNav() {
   const onShift = user?.role === "agente_ventas";
   const { presence, failed, setStatus } = usePresence(onShift);
   const path = window.location.pathname;
-  const links = [
-    { href: "/", label: "Pulso", show: true, active: path === "/" },
-    {
-      href: "/whatsapp",
-      label: "Chats",
-      show: permissions.includes("wa:read"),
-      active: path === "/whatsapp",
-    },
-    { href: "/crm", label: "CRM", show: permissions.includes("wa:read"), active: path === "/crm" },
-  ].filter((l) => l.show);
+  const active = ["/bandeja", "/whatsapp"].includes(path)
+    ? "Bandeja"
+    : path === "/contactos"
+      ? "Contactos"
+      : ["/tools", "/crm"].includes(path)
+        ? "TOOLS"
+        : path === "/ajustes"
+          ? "Ajustes"
+          : "Pulso";
   return (
     <header className="z-30 border-b border-line bg-white">
-      <div className="mx-auto flex h-16 max-w-[1800px] items-center justify-between gap-3 px-4 sm:px-6">
+      <div className="mx-auto flex min-h-16 flex-wrap py-2 max-w-[1800px] items-center justify-between gap-3 px-4 sm:px-6">
         <a href="/" aria-label="Ir al inicio">
           <BrandLogo mark className="h-9 sm:hidden" />
           <BrandLogo className="hidden h-9 sm:block" />
         </a>
-        <nav className="flex items-center gap-1">
-          {links.map((l) => (
-            <a
-              key={l.href}
-              href={l.href}
-              aria-current={l.active ? "page" : undefined}
-              className={`rounded-xl px-4 py-2 text-sm font-semibold ${l.active ? "bg-primary-soft text-primary" : "text-muted hover:bg-slate-50"}`}
-            >
-              {l.label}
-            </a>
-          ))}
-        </nav>
+        <div className="order-3 w-full md:order-none md:w-auto">
+          <PrimaryNav active={active} />
+        </div>
         <div className="flex items-center gap-2">
           {onShift && <PresenceControl presence={presence} failed={failed} onChange={setStatus} />}
           <button

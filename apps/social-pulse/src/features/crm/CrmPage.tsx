@@ -334,9 +334,12 @@ function Automations({ canManageReplies }: { canManageReplies: boolean }) {
 export function CrmPage() {
   const { user } = useAuth();
   const permissions = user?.permissions ?? [];
-  const mayRead = permissions.includes("wa:read");
+  const mayRead =
+    permissions.includes("wa:read") &&
+    permissions.includes("automation:read") &&
+    !!user?.screens.includes("marketing");
   const seesAutomation = permissions.includes("automation:read");
-  const [tab, setTab] = useState<Tab>("contacts");
+  const [tab, setTab] = useState<Tab>("automations");
   const [summary, setSummary] = useState<Summary | null>(null);
   const [overview, setOverview] = useState<Overview | null>(null);
 
@@ -360,7 +363,7 @@ export function CrmPage() {
       <>
         <AppNav />
         <main className="p-8">
-          Tu rol no tiene acceso al CRM.{" "}
+          TOOLS está disponible en la vista de marketing y supervisión.{" "}
           <a className="text-primary" href="/">
             Volver
           </a>
@@ -369,7 +372,6 @@ export function CrmPage() {
     );
 
   const tabs: { key: Tab; label: string }[] = [
-    { key: "contacts", label: "Contactos" },
     ...(seesAutomation
       ? [
           { key: "campaigns" as Tab, label: "Campañas" },
@@ -384,14 +386,13 @@ export function CrmPage() {
         <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
           <div>
             <p className="flex items-center gap-2 text-xs font-bold uppercase tracking-[0.16em] text-primary">
-              <Link2 size={13} /> CRM omnicanal
+              <Link2 size={13} /> TOOLS
             </p>
             <h1 className="mt-2 text-3xl font-bold tracking-tight sm:text-4xl">
-              Conversaciones que avanzan
+              Herramientas de marketing
             </h1>
             <p className="mt-2 max-w-2xl text-sm leading-6 text-muted">
-              Centraliza a tus pacientes, mira en qué etapa está cada uno y gestiona campañas y
-              automatizaciones sin salir de Medical Social Pulse.
+              Gestiona campañas, mensajes pregrabados y automatizaciones desde un solo lugar.
             </p>
           </div>
           <button
@@ -475,6 +476,24 @@ export function CrmPage() {
             <Automations canManageReplies={permissions.includes("crm:manage")} />
           )}
         </div>
+      </main>
+    </div>
+  );
+}
+
+export function ContactsPage() {
+  const { user } = useAuth();
+  return (
+    <div className="min-h-screen bg-canvas text-ink">
+      <AppNav />
+      <main className="mx-auto max-w-[1400px] px-4 py-8 sm:px-6">
+        <p className="text-xs font-bold uppercase tracking-widest text-primary">Seguimiento</p>
+        <h1 className="mb-6 mt-2 text-3xl font-bold">Contactos</h1>
+        {user?.permissions.includes("wa:read") ? (
+          <Contacts mayAssign={user.permissions.includes("contacts:assign_any")} />
+        ) : (
+          <p>Tu rol no tiene acceso a los contactos.</p>
+        )}
       </main>
     </div>
   );

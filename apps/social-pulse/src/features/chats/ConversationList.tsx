@@ -1,5 +1,5 @@
 import { FormEvent, useState } from "react";
-import { Search } from "lucide-react";
+import { Search, Filter } from "lucide-react";
 import type { ConversationItem, Counts, Scope } from "./api";
 import { colorOf, initials, nice, shortTime, stageOf } from "./format";
 
@@ -23,7 +23,7 @@ export function Avatar({
 }) {
   return (
     <span
-      className={`relative grid ${size} shrink-0 place-items-center rounded-full text-sm font-bold text-white ${colorOf(phone)}`}
+      className={`relative grid ${size} shrink-0 place-items-center rounded-full text-sm font-bold text-primary bg-primary-soft`}
     >
       {initials(name, phone)}
       {badge && (
@@ -66,6 +66,7 @@ export function ConversationList({
   onOpenPhone: (phone: string) => void;
   opening: boolean;
 }) {
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [phone, setPhone] = useState("");
   const submit = (event: FormEvent) => {
     event.preventDefault();
@@ -76,7 +77,23 @@ export function ConversationList({
   return (
     <aside className="flex min-h-0 flex-col border-r border-line bg-white">
       <div className="space-y-3 border-b border-line p-4">
-        <h2 className="text-lg font-bold">Conversaciones</h2>
+        <div className="flex items-center justify-between gap-2">
+          <div>
+            <p className="text-[9px] font-bold uppercase tracking-[0.16em] text-primary">
+              Bandeja omnicanal
+            </p>
+            <h2 className="mt-1 text-sm font-bold">Conversaciones</h2>
+          </div>
+          <button
+            type="button"
+            aria-label="Filtrar conversaciones"
+            aria-expanded={filtersOpen}
+            onClick={() => setFiltersOpen(!filtersOpen)}
+            className="rounded-xl border border-line p-2 text-muted"
+          >
+            <Filter size={15} />
+          </button>
+        </div>
         <label className="relative block">
           <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
           <input
@@ -87,25 +104,31 @@ export function ConversationList({
             onChange={(e) => onSearch(e.target.value)}
           />
         </label>
-        <div className="flex flex-wrap gap-1.5" role="tablist">
-          {TABS.map((tab) => (
-            <button
-              key={tab.key}
-              type="button"
-              role="tab"
-              aria-selected={scope === tab.key}
-              onClick={() => onScope(tab.key)}
-              className={`whitespace-nowrap rounded-full px-3 py-1.5 text-xs font-semibold ${
-                scope === tab.key
-                  ? "bg-primary text-white"
-                  : "bg-slate-100 text-muted hover:bg-slate-200"
-              }`}
-            >
-              {tab.label}
-              {counts[tab.key] > 0 && tab.key !== "all" ? ` ${counts[tab.key]}` : ""}
-            </button>
-          ))}
-        </div>
+        <p className="text-[10px] text-muted">
+          {counts.all} conversaciones · WhatsApp
+          {scope !== "all" ? ` · ${TABS.find((t) => t.key === scope)?.label}` : ""}
+        </p>
+        {filtersOpen && (
+          <div className="flex flex-wrap gap-1.5" role="tablist">
+            {TABS.map((tab) => (
+              <button
+                key={tab.key}
+                type="button"
+                role="tab"
+                aria-selected={scope === tab.key}
+                onClick={() => onScope(tab.key)}
+                className={`whitespace-nowrap rounded-full px-3 py-1.5 text-xs font-semibold ${
+                  scope === tab.key
+                    ? "bg-primary text-white"
+                    : "bg-slate-100 text-muted hover:bg-slate-200"
+                }`}
+              >
+                {tab.label}
+                {counts[tab.key] > 0 && tab.key !== "all" ? ` ${counts[tab.key]}` : ""}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       <ul className="min-h-0 flex-1 overflow-y-auto">
@@ -117,18 +140,18 @@ export function ConversationList({
               <button
                 type="button"
                 onClick={() => onSelect(c.id)}
-                className={`flex w-full items-center gap-3 border-b border-slate-100 px-4 py-3 text-left ${
+                className={`flex w-full items-center gap-2.5 border-b border-slate-100 border-l-[3px] px-3 py-3.5 text-left ${
                   selected === c.id
-                    ? "bg-primary-soft"
+                    ? "bg-primary-soft border-l-primary"
                     : unread
-                      ? "bg-sky-50/60 hover:bg-slate-50"
-                      : "hover:bg-slate-50"
+                      ? "border-l-transparent hover:bg-slate-50"
+                      : "border-l-transparent hover:bg-slate-50"
                 }`}
               >
                 <Avatar name={c.name} phone={c.phone} />
                 <span className="min-w-0 flex-1">
                   <span className="flex items-baseline justify-between gap-2">
-                    <span className={`truncate text-sm ${unread ? "font-bold" : "font-semibold"}`}>
+                    <span className={`truncate text-xs ${unread ? "font-bold" : "font-semibold"}`}>
                       {c.name || nice(c.phone)}
                     </span>
                     <span className="shrink-0 text-[11px] text-muted">
@@ -136,27 +159,19 @@ export function ConversationList({
                     </span>
                   </span>
                   <span className="mt-0.5 flex items-center justify-between gap-2">
-                    <span className={`truncate text-[13px] ${unread ? "text-ink" : "text-muted"}`}>
+                    <span className={`truncate text-[11px] ${unread ? "text-ink" : "text-muted"}`}>
                       {c.last
                         ? `${c.last.direction === "out" ? "Tú: " : ""}${c.last.body}`
                         : "Sin mensajes aún"}
                     </span>
                     {unread && (
-                      <span className="grid min-w-5 shrink-0 place-items-center rounded-full bg-[#25d366] px-1.5 text-[11px] font-bold text-white">
+                      <span className="grid min-w-5 shrink-0 place-items-center rounded-full bg-primary px-1.5 text-[11px] font-bold text-white">
                         {c.unread}
                       </span>
                     )}
                   </span>
-                  <span className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px] font-semibold">
-                    <span className={`rounded-full px-2 py-0.5 ${stage.chip}`}>{stage.label}</span>
-                    {c.origin === "tiktok_live" && (
-                      <span className="rounded-full bg-slate-900 px-2 py-0.5 text-white">
-                        Del LIVE
-                      </span>
-                    )}
-                    <span className="text-muted">
-                      {c.is_mine ? "Mío" : c.advisor_name ? c.advisor_name : "Sin asignar"}
-                    </span>
+                  <span className="mt-1 block text-[10px] font-semibold text-primary">
+                    {nice(c.phone)}
                   </span>
                 </span>
               </button>

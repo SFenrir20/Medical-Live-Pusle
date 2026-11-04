@@ -6,7 +6,8 @@ import { LoginScreen } from "@/features/auth/LoginScreen";
 import { Dashboard } from "@/features/dashboard/Dashboard";
 import { TikTokConnection } from "@/features/integrations/TikTokConnection";
 import { ChatsPage } from "@/features/chats/ChatsPage";
-import { CrmPage } from "@/features/crm/CrmPage";
+import { SettingsPage } from "@/features/shell/SettingsPage";
+import { CrmPage, ContactsPage } from "@/features/crm/CrmPage";
 
 function AccessProblem({
   message,
@@ -73,8 +74,10 @@ export default function App() {
   }
 
   if (!isAuthenticated) return <LoginScreen />;
-  if (window.location.pathname === "/whatsapp") return <ChatsPage />;
-  if (window.location.pathname === "/crm") return <CrmPage />;
+  if (["/bandeja", "/whatsapp"].includes(window.location.pathname)) return <ChatsPage />;
+  if (["/tools", "/crm"].includes(window.location.pathname)) return <CrmPage />;
+  if (window.location.pathname === "/contactos") return <ContactsPage />;
+  if (window.location.pathname === "/ajustes") return <SettingsPage />;
   return window.location.pathname === "/integraciones/tiktok" ? (
     <TikTokConnection />
   ) : (

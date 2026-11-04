@@ -15,19 +15,23 @@ export function PresenceControl({
 }: {
   presence: PresenceState | null;
   failed: boolean;
-  onChange: (status: "available" | "paused") => void;
+  onChange: (status: "available" | "paused" | "offline") => void;
 }) {
   const state = failed || !presence ? "offline" : presence.state;
   const light = LIGHT[state];
   const label =
     failed || !presence
       ? "Sin conexión"
-      : state === "paused"
-        ? "En pausa"
-        : presence.auto_assignment
-          ? "Recibiendo contactos"
-          : "Conectado";
-  const paused = presence?.status === "paused";
+      : state === "offline"
+        ? "Desconectado"
+        : state === "paused"
+          ? presence.status === "paused"
+            ? "En pausa"
+            : "Inactivo"
+          : presence.auto_assignment
+            ? "Recibiendo contactos"
+            : "Conectado";
+  const paused = state !== "online";
   return (
     <div className="flex items-center gap-2">
       <span
@@ -35,13 +39,22 @@ export function PresenceControl({
         title={
           failed
             ? "No se pudo avisar que estás conectado. Revisa tu internet."
-            : "Mientras tengas esta pantalla abierta, el sistema te considera conectado."
+            : "Verde: actividad reciente. Amarillo: inactividad o pestaña oculta. Tras 15 minutos en amarillo debes reconectarte."
         }
       >
         <span className={`size-2.5 rounded-full ring-4 ${light.dot} ${light.ring}`} />
         <span className={`hidden text-xs font-bold sm:inline ${light.text}`}>{label}</span>
       </span>
-      {presence && !failed && presence.auto_assignment && (
+      {presence && !failed && state !== "offline" && (
+        <span
+          className="hidden text-[11px] text-muted lg:inline"
+          title="Tiempo conectado en esta sesión de trabajo"
+        >
+          Sesión {Math.floor((presence.session_seconds ?? 0) / 3600)} h{" "}
+          {Math.floor((presence.session_seconds ?? 0) / 60) % 60} min
+        </span>
+      )}
+      {presence && !failed && (
         <button
           type="button"
           onClick={() => onChange(paused ? "available" : "paused")}
@@ -53,7 +66,18 @@ export function PresenceControl({
           }
         >
           {paused ? <Play size={13} /> : <Pause size={13} />}
-          <span className="hidden sm:inline">{paused ? "Reanudar" : "Pausar"}</span>
+          <span className="hidden sm:inline">
+            {state === "offline" ? "Conectarme" : paused ? "Reanudar" : "Pausar"}
+          </span>
+        </button>
+      )}
+      {presence && !failed && state !== "offline" && (
+        <button
+          type="button"
+          onClick={() => onChange("offline")}
+          className="text-xs text-muted hover:text-red-600"
+        >
+          Desconectarme
         </button>
       )}
     </div>

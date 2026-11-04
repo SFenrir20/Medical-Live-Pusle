@@ -48,6 +48,7 @@ export type CrmDetail = ConversationItem & {
 };
 
 export type Message = {
+  has_image?: boolean;
   id: number;
   direction: "in" | "out";
   author_kind: string;
@@ -137,6 +138,26 @@ export const chatApi = {
     get<Thread>(`/whatsapp/conversations/${id}`, before ? { before } : undefined),
   send: (id: number, request_id: string, text: string) =>
     call<Message>("post", `/whatsapp/conversations/${id}/messages`, { request_id, text }),
+
+  image: async (id: number) =>
+    (
+      await apiClient.get<Blob>(`/whatsapp/messages/${id}/image`, {
+        responseType: "blob",
+        timeout: 25000,
+      })
+    ).data,
+  sendImage: async (id: number, request_id: string, text: string, file: File) => {
+    const data = new FormData();
+    data.append("request_id", request_id);
+    data.append("text", text);
+    data.append("file", file);
+    return (
+      await apiClient.post<Message>(`/whatsapp/conversations/${id}/images`, data, {
+        headers: { "Content-Type": "multipart/form-data" },
+        timeout: 30000,
+      })
+    ).data;
+  },
 
   conversations: (scope: Scope, q: string, offset: number) =>
     get<{ items: ConversationItem[]; has_more: boolean; counts: Counts }>("/crm/conversations", {

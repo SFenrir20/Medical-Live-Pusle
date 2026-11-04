@@ -1,3 +1,4 @@
+import { registerImage, loadImage, isViewOnce } from './images.js';
 import makeWASocket, { DisconnectReason, jidDecode, normalizeMessageContent, getContentType,
   generateMessageIDV2 } from '@whiskeysockets/baileys';
 import pino from 'pino';
@@ -24,6 +25,9 @@ export class Mirror {
     this.state = 'disconnected'; this.qr = null; this.socket = null;
     this.eventsTail = Promise.resolve(); this.sendTail = Promise.resolve();
     this.retryTimer = null; this.attempt = 0;
+    this.imageDownloads = new Map();
+    this.imageSlots = [Promise.resolve(), Promise.resolve()];
+    this.nextImageSlot = 0;
   }
   status() { return { state: this.state, phone: this.expectedPhone, qr: this.qr, unresolved: this.store.pendingCount() }; }
   bindAccount(jid) {
@@ -132,14 +136,31 @@ export class Mirror {
     const body = content.conversation || content.extendedTextMessage?.text ||
       `[${label}: consultar en el teléfono]${caption ? '\n' + caption : ''}`;
     const intent = this.store.get(`outgoing:${key.id}`);
+    // View-once media stays on the phone; never persist it as a normal attachment.
+    const once = isViewOnce(message.message);
+    const media_id = !once && type === 'imageMessage'
+      ? (intent?.media_id || registerImage(this.store, phone, message)) : null;
     this.store.transaction(() => {
       this.store.set(`m:${key.id}`, null, 'pending');
       this.store.set(`message:${key.id}`, message.message);
-      this.store.event({ type: 'message', external_id: key.id, phone, body: body.slice(0, 20000),
+      this.store.event({ type: 'message', external_id: key.id, phone, body: media_id ? (caption || '[Imagen]') : body.slice(0, 20000),
         from_me: !!key.fromMe, request_id: intent?.request_id || null, at,
-        name: key.fromMe ? null : message.pushName, media_type: type });
+        name: key.fromMe ? null : message.pushName, media_type: type, media_id });
       if (intent) this.store.set(`request:${intent.request_id}`, { ...intent, state: 'sent', at });
     });
+    if (media_id) void this.image(media_id).catch(() => {}); // Retry on view if temporarily unavailable.
+  }
+  image(id) {
+    if (!this.imageDownloads.has(id)) {
+      const cached = this.store.get(`image:${id}`);
+      if (cached?.data) return Promise.resolve(cached);
+      const slot = this.nextImageSlot++ % this.imageSlots.length;
+      const task = this.imageSlots[slot].then(() => loadImage(this.store, this.socket, id))
+        .finally(() => this.imageDownloads.delete(id));
+      this.imageSlots[slot] = task.catch(() => {});
+      this.imageDownloads.set(id, task);
+    }
+    return this.imageDownloads.get(id);
   }
   async receipt(key, status, at, clock) {
     if (!this.matchesAccount()) return;
@@ -160,24 +181,28 @@ export class Mirror {
     this.sendTail = operation.catch(() => {});
     return operation;
   }
-  async sendOnce({ request_id, phone, text }) {
+  async sendOnce({ request_id, phone, text, media_id = null }) {
     if (!/^[a-f0-9-]{36}$/i.test(request_id || '') || !/^\+[1-9]\d{7,14}$/.test(phone || '') ||
-      typeof text !== 'string' || !text.trim() || text.length > 4000) throw new Error('invalid_send');
+      typeof text !== 'string' || (!text.trim() && !media_id) || text.length > 4000 ||
+      (media_id && !/^[a-f0-9]{64}$/.test(media_id))) throw new Error('invalid_send');
     const previous = this.store.get(`request:${request_id}`);
     if (previous) {
-      if (previous.phone !== phone || previous.text !== text) throw new Error('request_conflict');
+      if (previous.phone !== phone || previous.text !== text || (previous.media_id || null) !== media_id) throw new Error('request_conflict');
       return previous; // Never re-send an ambiguous attempt after a crash or timeout.
     }
     if (this.state !== 'connected' || !this.matchesAccount()) return { state: 'offline' };
+    const image = media_id ? await this.image(media_id) : null;
+    if (image && image.phone !== phone) throw new Error('image_phone_mismatch');
     const external_id = generateMessageIDV2(this.socket.user.id);
-    const intent = { request_id, phone, text, external_id, state: 'unknown' };
+    const intent = { request_id, phone, text, media_id, external_id, state: 'unknown' };
     this.store.transaction(() => {
       this.store.set(`request:${request_id}`, intent);
       this.store.set(`outgoing:${external_id}`, intent);
     });
     try {
       let timer;
-      const attempt = this.socket.sendMessage(phone.slice(1) + '@s.whatsapp.net', { text }, { messageId: external_id });
+      const attempt = this.socket.sendMessage(phone.slice(1) + '@s.whatsapp.net', image
+        ? { image: Buffer.from(image.data, 'base64'), mimetype: image.mime, caption: text } : { text }, { messageId: external_id });
       // Preserve a late success even if the HTTP caller timed out.
       attempt.then(message => this.message(message)).catch(() => {});
       const message = await Promise.race([attempt, new Promise((_, reject) => {

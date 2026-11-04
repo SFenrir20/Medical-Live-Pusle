@@ -1,3 +1,4 @@
+import { ChatImage, ImagePreview } from "./ChatImage";
 import { FormEvent, Fragment, KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   AlertTriangle,
@@ -8,6 +9,8 @@ import {
   CheckCheck,
   Clock,
   MailOpen,
+  MoreVertical,
+  ImagePlus,
   MessageCircle,
   Search,
   Send,
@@ -111,10 +114,14 @@ export function ChatThread({
   onResult: (value: string) => void;
   onArchive: () => void;
   onUnread: () => void;
-  onSend: (text: string) => Promise<boolean>;
+  onSend: (text: string, file?: File) => Promise<boolean>;
   onSchedule: (text: string, sendAt: string) => Promise<boolean>;
 }) {
+  const [actionsOpen, setActionsOpen] = useState(false);
   const [draft, setDraft] = useState("");
+  const [attachment, setAttachment] = useState<File | undefined>();
+  const [imageError, setImageError] = useState("");
+  const fileInput = useRef<HTMLInputElement>(null);
   const [popover, setPopover] = useState<"replies" | "emoji" | "schedule" | null>(null);
   const [searching, setSearching] = useState(false);
   const [needle, setNeedle] = useState("");
@@ -153,7 +160,7 @@ export function ChatThread({
 
   if (!detail)
     return (
-      <section className="grid min-h-0 place-items-center bg-[#efeae2] p-8 text-center text-muted">
+      <section className="grid min-h-0 place-items-center bg-[#faf9f6] p-8 text-center text-muted">
         <div>
           <MessageCircle className="mx-auto mb-3" />
           Selecciona una conversación o abre el número de un contacto.
@@ -173,8 +180,9 @@ export function ChatThread({
   const submit = async (event?: FormEvent) => {
     event?.preventDefault();
     const text = draft.trim();
-    if (!text || busy || !canWrite) return;
-    if (await onSend(text)) {
+    if ((!text && !attachment) || busy || !canWrite) return;
+    if (await onSend(text, attachment)) {
+      setAttachment(undefined);
       setDraft("");
       follow.current = true;
     }
@@ -194,6 +202,10 @@ export function ChatThread({
     setPopover(null);
   };
   const plan = async () => {
+    if (attachment) {
+      setImageError("El envío programado admite texto; envía la imagen desde el chat.");
+      return;
+    }
     const text = draft.trim();
     if (!text || !when) return;
     if (await onSchedule(text, lima(when))) {
@@ -214,7 +226,7 @@ export function ChatThread({
         <button
           type="button"
           onClick={onBack}
-          className="rounded-lg p-1 text-muted hover:bg-slate-100 lg:hidden"
+          className="rounded-lg p-1 text-muted hover:bg-slate-100 md:hidden"
           aria-label="Volver a la lista"
         >
           <ArrowLeft size={18} />
@@ -234,7 +246,7 @@ export function ChatThread({
         <button
           type="button"
           onClick={onFicha}
-          className="rounded-xl border border-line px-3 py-2 text-xs font-bold text-muted hover:bg-slate-50 xl:hidden"
+          className="rounded-xl border border-line px-3 py-2 text-xs font-bold text-muted hover:bg-slate-50 min-[68.75rem]:hidden"
         >
           Ficha
         </button>
@@ -248,80 +260,94 @@ export function ChatThread({
             Tomar contacto
           </button>
         )}
+        <span className="ml-auto hidden rounded-full bg-emerald-50 px-2 py-1 text-[10px] font-semibold text-emerald-700 min-[87.5rem]:inline">
+          {detail.archived ? "Archivada" : "Conversación abierta"}
+        </span>
+        <button
+          type="button"
+          aria-label="Opciones de conversación"
+          aria-expanded={actionsOpen}
+          onClick={() => setActionsOpen(!actionsOpen)}
+          className="rounded-xl border border-line p-2 text-muted"
+        >
+          <MoreVertical size={15} />
+        </button>
       </header>
 
-      <div className="flex flex-wrap items-center gap-2 border-b border-line px-4 py-2.5">
-        <select
-          aria-label="Etapa del contacto"
-          value={detail.stage}
-          disabled={!detail.can_edit || busy}
-          onChange={(e) => onStage(e.target.value as Stage)}
-          className="rounded-lg border border-line bg-white px-3 py-1.5 text-sm font-semibold disabled:opacity-60"
-        >
-          {STAGES.map((s) => (
-            <option key={s.value} value={s.value}>
-              {s.label}
-            </option>
-          ))}
-        </select>
-        <select
-          aria-label="Resultado"
-          value={detail.result ?? ""}
-          disabled={!detail.can_edit || busy}
-          onChange={(e) => onResult(e.target.value)}
-          className="rounded-lg border border-line bg-white px-3 py-1.5 text-sm text-muted disabled:opacity-60"
-        >
-          <option value="">Marcar resultado</option>
-          {RESULTS.map((r) => (
-            <option key={r.value} value={r.value}>
-              {r.label}
-            </option>
-          ))}
-        </select>
-        <span className="ml-auto flex items-center gap-1.5">
-          <button
-            type="button"
-            title="Marcar como no leído"
-            aria-label="Marcar como no leído"
+      {actionsOpen && (
+        <div className="flex flex-wrap items-center gap-2 border-b border-line px-4 py-2.5">
+          <select
+            aria-label="Etapa del contacto"
+            value={detail.stage}
             disabled={!detail.can_edit || busy}
-            onClick={onUnread}
-            className="grid size-9 place-items-center rounded-lg border border-line hover:bg-slate-50 disabled:opacity-40"
+            onChange={(e) => onStage(e.target.value as Stage)}
+            className="rounded-lg border border-line bg-white px-3 py-1.5 text-sm font-semibold disabled:opacity-60"
           >
-            <MailOpen size={16} />
-          </button>
-          <button
-            type="button"
-            title={detail.archived ? "Desarchivar" : "Archivar"}
-            aria-label={detail.archived ? "Desarchivar" : "Archivar"}
+            {STAGES.map((s) => (
+              <option key={s.value} value={s.value}>
+                {s.label}
+              </option>
+            ))}
+          </select>
+          <select
+            aria-label="Resultado"
+            value={detail.result ?? ""}
             disabled={!detail.can_edit || busy}
-            onClick={onArchive}
-            className="grid size-9 place-items-center rounded-lg border border-line hover:bg-slate-50 disabled:opacity-40"
+            onChange={(e) => onResult(e.target.value)}
+            className="rounded-lg border border-line bg-white px-3 py-1.5 text-sm text-muted disabled:opacity-60"
           >
-            {detail.archived ? <ArchiveRestore size={16} /> : <Archive size={16} />}
-          </button>
-          <button
-            type="button"
-            title="Buscar en la conversación"
-            aria-label="Buscar en la conversación"
-            onClick={() => {
-              setSearching((v) => !v);
-              setNeedle("");
-            }}
-            className={`grid size-9 place-items-center rounded-lg border border-line hover:bg-slate-50 ${searching ? "bg-primary-soft text-primary" : ""}`}
-          >
-            <Search size={16} />
-          </button>
-        </span>
-        {searching && (
-          <input
-            autoFocus
-            value={needle}
-            onChange={(e) => setNeedle(e.target.value)}
-            placeholder="Buscar en esta conversación"
-            className="w-full rounded-lg border border-line px-3 py-1.5 text-sm outline-none focus:border-primary"
-          />
-        )}
-      </div>
+            <option value="">Marcar resultado</option>
+            {RESULTS.map((r) => (
+              <option key={r.value} value={r.value}>
+                {r.label}
+              </option>
+            ))}
+          </select>
+          <span className="ml-auto flex items-center gap-1.5">
+            <button
+              type="button"
+              title="Marcar como no leído"
+              aria-label="Marcar como no leído"
+              disabled={!detail.can_edit || busy}
+              onClick={onUnread}
+              className="grid size-9 place-items-center rounded-lg border border-line hover:bg-slate-50 disabled:opacity-40"
+            >
+              <MailOpen size={16} />
+            </button>
+            <button
+              type="button"
+              title={detail.archived ? "Desarchivar" : "Archivar"}
+              aria-label={detail.archived ? "Desarchivar" : "Archivar"}
+              disabled={!detail.can_edit || busy}
+              onClick={onArchive}
+              className="grid size-9 place-items-center rounded-lg border border-line hover:bg-slate-50 disabled:opacity-40"
+            >
+              {detail.archived ? <ArchiveRestore size={16} /> : <Archive size={16} />}
+            </button>
+            <button
+              type="button"
+              title="Buscar en la conversación"
+              aria-label="Buscar en la conversación"
+              onClick={() => {
+                setSearching((v) => !v);
+                setNeedle("");
+              }}
+              className={`grid size-9 place-items-center rounded-lg border border-line hover:bg-slate-50 ${searching ? "bg-primary-soft text-primary" : ""}`}
+            >
+              <Search size={16} />
+            </button>
+          </span>
+          {searching && (
+            <input
+              autoFocus
+              value={needle}
+              onChange={(e) => setNeedle(e.target.value)}
+              placeholder="Buscar en esta conversación"
+              className="w-full rounded-lg border border-line px-3 py-1.5 text-sm outline-none focus:border-primary"
+            />
+          )}
+        </div>
+      )}
 
       <div
         ref={list}
@@ -329,7 +355,7 @@ export function ChatThread({
           const el = e.currentTarget;
           follow.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
         }}
-        className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto bg-[#efeae2] px-4 py-4 sm:px-8 [background-image:radial-gradient(rgb(0_0_0/4%)_1px,transparent_1px)] [background-size:18px_18px]"
+        className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto bg-[#faf9f6] px-4 py-4 sm:px-8 [background-image:radial-gradient(rgb(14_148_171/12%)_1px,transparent_1px)] [background-size:18px_18px]"
       >
         <div className="flex justify-between text-xs font-semibold text-primary">
           {thread?.has_more && thread.messages[0] && (
@@ -361,7 +387,7 @@ export function ChatThread({
                 </span>
               )}
               <article
-                className={`max-w-[85%] rounded-xl px-3 py-1.5 text-sm shadow-sm sm:max-w-[70%] ${out ? "self-end rounded-tr-sm bg-[#d9fdd3]" : "self-start rounded-tl-sm bg-white"}`}
+                className={`max-w-[85%] rounded-2xl px-4 py-3 text-xs leading-5 shadow-sm sm:max-w-[85%] ${out ? "self-end rounded-tr-sm bg-[#dcf8e7]" : "self-start rounded-tl-sm bg-white"}`}
               >
                 {out && (
                   <p className="text-[11px] font-bold text-emerald-800">
@@ -370,7 +396,10 @@ export function ChatThread({
                       : "Desde teléfono u otro dispositivo"}
                   </p>
                 )}
-                <p className="whitespace-pre-wrap break-words">{m.body}</p>
+                {m.has_image && <ChatImage messageId={m.id} />}
+                {(m.body !== "[Imagen]" || !m.has_image) && (
+                  <p className="whitespace-pre-wrap break-words">{m.body}</p>
+                )}
                 <p
                   title={timesTitle(m)}
                   className="mt-0.5 flex items-center justify-end gap-1 text-[10.5px] text-[#667781]"
@@ -392,7 +421,7 @@ export function ChatThread({
         })}
       </div>
 
-      <div className="relative border-t border-line bg-[#f0f2f5] p-3">
+      <div className="relative border-t border-line bg-white p-3">
         {!canSend && (
           <p className="px-2 pb-2 text-xs text-muted">Tu rol solo revisa las conversaciones.</p>
         )}
@@ -495,7 +524,50 @@ export function ChatThread({
           </div>
         )}
 
-        <form onSubmit={submit} className="flex items-end gap-2">
+        {attachment && (
+          <div className="mb-2 flex items-start gap-3">
+            <ImagePreview file={attachment} />
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => setAttachment(undefined)}
+              className="text-xs text-primary"
+            >
+              Quitar imagen
+            </button>
+            <span className="text-xs text-muted">{attachment.name}</span>
+          </div>
+        )}
+        {imageError && (
+          <p role="alert" className="mb-2 text-xs text-red-700">
+            {imageError}
+          </p>
+        )}
+        <input
+          ref={fileInput}
+          type="file"
+          accept="image/jpeg,image/png,image/webp"
+          className="hidden"
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            e.target.value = "";
+            setImageError("");
+            if (!file) return;
+            if (
+              !["image/jpeg", "image/png", "image/webp"].includes(file.type) ||
+              file.size > 8 * 1024 * 1024
+            ) {
+              setImageError("Selecciona una imagen JPG, PNG o WebP de hasta 8 MB.");
+              return;
+            }
+            setAttachment(file);
+            setPopover(null);
+          }}
+        />
+        <form
+          onSubmit={submit}
+          className="flex items-end gap-1 rounded-2xl border border-line bg-canvas p-1.5"
+        >
           <button
             type="button"
             title="Emojis"
@@ -504,6 +576,16 @@ export function ChatThread({
             className="grid size-10 shrink-0 place-items-center rounded-full text-[#54656f] hover:bg-slate-200"
           >
             <Smile size={20} />
+          </button>
+          <button
+            type="button"
+            title="Adjuntar imagen"
+            aria-label="Adjuntar imagen"
+            disabled={!canWrite || busy}
+            onClick={() => fileInput.current?.click()}
+            className="grid size-10 shrink-0 place-items-center rounded-full text-[#54656f] disabled:opacity-40"
+          >
+            <ImagePlus size={20} />
           </button>
           <textarea
             aria-label="Mensaje de WhatsApp"
@@ -518,14 +600,14 @@ export function ChatThread({
                 ? "Escribe un mensaje (/ para respuestas rápidas)"
                 : "No puedes escribir en esta conversación"
             }
-            className="max-h-32 min-h-10 flex-1 resize-none rounded-2xl border-0 bg-white px-4 py-2.5 text-sm outline-none disabled:opacity-60"
+            className="max-h-32 min-h-10 min-w-0 flex-1 resize-none rounded-2xl border-0 bg-white px-4 py-2.5 text-sm outline-none disabled:opacity-60"
           />
           <button
             type="button"
             title="Mensajes pregrabados"
             aria-label="Mensajes pregrabados"
             onClick={() => setPopover(popover === "replies" ? null : "replies")}
-            className="grid size-10 shrink-0 place-items-center rounded-full text-[#54656f] hover:bg-slate-200"
+            className="hidden size-10 shrink-0 place-items-center rounded-full text-muted 2xl:grid"
           >
             <Zap size={19} />
           </button>
@@ -533,24 +615,24 @@ export function ChatThread({
             type="button"
             title="Programar envío"
             aria-label="Programar envío"
-            disabled={!canWrite}
+            disabled={!canWrite || !!attachment}
             onClick={() => setPopover(popover === "schedule" ? null : "schedule")}
-            className="grid size-10 shrink-0 place-items-center rounded-full text-[#54656f] hover:bg-slate-200 disabled:opacity-40"
+            className="hidden size-10 shrink-0 place-items-center rounded-full text-muted disabled:opacity-40 2xl:grid"
           >
             <Clock size={19} />
           </button>
           <button
-            disabled={busy || !canWrite || !draft.trim()}
+            disabled={busy || !canWrite || (!draft.trim() && !attachment)}
             title="Enviar"
             aria-label="Enviar"
-            className="grid size-10 shrink-0 place-items-center rounded-full bg-[#128c7e] text-white disabled:opacity-40"
+            className="grid size-10 shrink-0 place-items-center rounded-full bg-primary text-white disabled:opacity-40"
           >
             <Send size={18} />
           </button>
         </form>
         <p className="px-2 pt-1.5 text-[11px] text-[#667781]">
-          Texto por WhatsApp. Enviado, entregado y leído se registran por separado: «leído» no
-          prueba que respondió.
+          Texto e imágenes por WhatsApp (hasta 8 MB). Enviado, entregado y leído se registran por
+          separado: «leído» no prueba que respondió.
         </p>
       </div>
     </section>

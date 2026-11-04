@@ -8,11 +8,12 @@ usan un transporte simulado y no demuestran conectividad con una cuenta real.**
 
 - Un número empresarial vinculado por QR, detectado automáticamente y guardado en la primera
   vinculación. No hace falta colocar el teléfono en variables de entorno.
-- Recepción de mensajes individuales desde la vinculación y envío de texto por asesoras.
+- Recepción de mensajes individuales desde la vinculación y envío de texto e imágenes por asesoras.
 - Mensajes de texto enviados desde el celular u otro dispositivo también aparecen, sin inventar
   qué persona los escribió. Grupos, estados y canales quedan fuera de la bandeja.
-- Los adjuntos se identifican por tipo (y su descripción cuando existe), pero su archivo aún debe
-  consultarse en el teléfono. No se descargan ni envían audios, fotos o documentos en esta V1.
+- Imágenes normales JPG/PNG/WebP: recepción, ampliación y envío de hasta 8 MB. Se guardan cifradas
+  en el volumen del conector. Ver `crm-omnicanal.md`, migración 0017.
+- Audios, documentos, stickers y archivos de una sola visualización siguen consultándose en el teléfono.
 - No se importa el historial completo anterior a la vinculación. No es una copia de seguridad
   del WhatsApp ni una garantía de recuperar mensajes de períodos sin conexión.
 - Contacto común por número E.164, incluso si WhatsApp llegó antes de la captura TikTok. Las
