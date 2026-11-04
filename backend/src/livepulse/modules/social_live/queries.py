@@ -80,6 +80,7 @@ def metrics_dict(m: LiveMetrics | None) -> dict:
     """Every figure either has a connected source or is explicitly unavailable (None)."""
     base = {f: 0 for f in METRIC_FIELDS}
     base.update(leads_per_hour=0.0, peak_viewers=0, average_viewers=None, unique_viewers=None,
+                current_viewers=None,
                 likes_summed=0, likes_reported_total=0, visitors_reported_total=0)
     if m is not None:
         base.update({f: getattr(m, f) for f in METRIC_FIELDS})
@@ -95,7 +96,9 @@ def metrics_dict(m: LiveMetrics | None) -> dict:
                     # the larger of it and our sum is the figure; both are exposed.
                     likes_count=max(m.likes_count, m.likes_reported_total),
                     likes_summed=m.likes_count, likes_reported_total=m.likes_reported_total,
-                    visitors_reported_total=m.visitors_reported_total)
+                    visitors_reported_total=m.visitors_reported_total,
+                    # Last audience sample (people watching right now while the LIVE is on).
+                    current_viewers=m.viewer_last_value)
     # What the sender reported is not evidence that private messages are being captured.
     base['direct_messages_reported'] = base.pop('direct_messages_count')
     base['direct_messages_capture'] = settings.dm_capture_connected

@@ -4,6 +4,7 @@ import logging
 import traceback
 from pathlib import Path
 
+from ..modules.crm.scheduled import tick as send_scheduled
 from ..modules.whatsapp.service import tick
 from ..shared.db import SessionLocal
 
@@ -20,6 +21,10 @@ async def main():
             frame = frames[-1] if frames else None
             location = f'{Path(frame.filename).name}:{frame.lineno}:{frame.name}' if frame else 'unknown'
             logger.warning('WhatsApp sync will retry (error=%s location=%s)', type(exc).__name__, location)
+        try:
+            await send_scheduled(SessionLocal)  # messages agents scheduled; same outbox
+        except Exception as exc:
+            logger.warning('Scheduled messages will retry (error=%s)', type(exc).__name__)
         await asyncio.sleep(3)
 
 

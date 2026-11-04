@@ -37,6 +37,7 @@ import { downloadLiveComments, LiveApi } from "@/features/workspace/api";
 import { BrandLogo } from "@/features/auth/BrandLogo";
 import { AudiencePanel } from "@/features/audience/AudiencePanel";
 import { AutomationPanel } from "@/features/automation/AutomationPanel";
+import { LivesCard } from "./LivesCard";
 import { AlertsPanel } from "@/features/notifications/AlertsPanel";
 import { NotificationBell } from "@/features/notifications/NotificationBell";
 import { PresenceControl } from "@/features/presence/PresenceControl";
@@ -422,6 +423,19 @@ function MarketingDashboard({ initialView = "Resumen" }: { initialView?: Marketi
                 {item}
               </button>
             ))}
+            {(user?.permissions ?? []).includes("wa:read") &&
+              [
+                ["/whatsapp", "Chats"],
+                ["/crm", "CRM"],
+              ].map(([href, text]) => (
+                <a
+                  key={href}
+                  href={href}
+                  className="rounded-xl px-4 py-2.5 text-sm font-semibold text-muted transition hover:bg-slate-50"
+                >
+                  {text}
+                </a>
+              ))}
           </nav>
           <div className="flex items-center gap-2">
             <NotificationBell onOpenAlerts={() => setView("Alertas")} />
@@ -493,6 +507,19 @@ function MarketingDashboard({ initialView = "Resumen" }: { initialView?: Marketi
               {item}
             </button>
           ))}
+          {(user?.permissions ?? []).includes("wa:read") &&
+            [
+              ["/whatsapp", "Chats"],
+              ["/crm", "CRM"],
+            ].map(([href, text]) => (
+              <a
+                key={href}
+                href={href}
+                className="whitespace-nowrap rounded-xl border border-line bg-white px-4 py-2.5 text-sm font-semibold text-muted"
+              >
+                {text}
+              </a>
+            ))}
         </div>
 
         <div className="mt-6 flex items-start gap-3 rounded-2xl border border-violet-200 bg-violet-50 p-5">
@@ -510,38 +537,8 @@ function MarketingDashboard({ initialView = "Resumen" }: { initialView?: Marketi
 
         {view === "Resumen" && (
           <>
-            <div className="mt-6 grid gap-4 lg:grid-cols-[1.2fr_.8fr]">
-              <section className="rounded-[24px] bg-deep p-6 text-white">
-                <div className="flex items-center justify-between">
-                  <span className="inline-flex items-center gap-2 text-xs font-bold tracking-wider text-cyan-300">
-                    <span
-                      className={`size-2 rounded-full bg-cyan-300 ${activeLives.length ? "animate-pulse" : "opacity-40"}`}
-                    />
-                    {activeLives.length ? "LIVE ACTIVO" : "SIN LIVE ACTIVO"}
-                  </span>
-                  <span className="font-mono text-sm text-cyan-100">
-                    {activeLives[0] ? elapsed(activeLives[0].started_at, now) : "--:--:--"}
-                  </span>
-                </div>
-                <div className="mt-7 flex items-center">
-                  <span className="grid size-12 place-items-center rounded-2xl bg-white text-ink">
-                    <Music2 size={21} />
-                  </span>
-                  <span className="ml-4 flex-1">
-                    <strong className="block text-lg">
-                      {activeLives[0]?.account ?? "Sin transmisión"}
-                    </strong>
-                    <span className="mt-1 block text-xs text-slate-400">
-                      {activeLives[0]
-                        ? `${activeLives[0].tiktoker ?? "Sin asignar"} · monitoreo activo`
-                        : "Esperando que una cuenta salga en vivo"}
-                    </span>
-                  </span>
-                  <span className="rounded-full bg-white/10 px-3 py-1.5 text-xs font-semibold">
-                    TikTok
-                  </span>
-                </div>
-              </section>
+            <LivesCard lives={activeLives} className="mt-6" />
+            <div className="mt-4">
               <section className="rounded-[24px] border border-amber-200 bg-amber-50 p-6">
                 <span className="grid size-11 place-items-center rounded-xl bg-white text-amber-600">
                   <BellRing size={20} />
@@ -1195,6 +1192,19 @@ function AgentDashboard({ onOpenMarketing }: { onOpenMarketing?: () => void }) {
                 {item}
               </button>
             ))}
+            {(user?.permissions ?? []).includes("wa:read") &&
+              [
+                ["/whatsapp", "Chats"],
+                ["/crm", "CRM"],
+              ].map(([href, text]) => (
+                <a
+                  key={href}
+                  href={href}
+                  className="rounded-xl px-4 py-2.5 text-sm font-semibold text-muted transition hover:bg-slate-50"
+                >
+                  {text}
+                </a>
+              ))}
           </nav>
           <div className="relative flex items-center gap-2">
             {user?.permissions.includes("wa:read") && <a href="/whatsapp" className="rounded-xl px-3 py-2 text-xs font-semibold text-primary">WhatsApp</a>}
@@ -1263,6 +1273,9 @@ function AgentDashboard({ onOpenMarketing }: { onOpenMarketing?: () => void }) {
 
             {view === "Pulso" && (
               <>
+                {canHistory && board.lives.some((l) => l.status === "live") && (
+                  <LivesCard lives={board.lives} className="mt-7" />
+                )}
                 <div className="mt-7 grid gap-4 lg:grid-cols-[1.45fr_1fr]">
                   <button
                     type="button"
@@ -1729,6 +1742,22 @@ function AgentDashboard({ onOpenMarketing }: { onOpenMarketing?: () => void }) {
               </button>
             );
           })}
+          {(user?.permissions ?? []).includes("wa:read") &&
+            (
+              [
+                ["/whatsapp", "Chats", MessageCircle],
+                ["/crm", "CRM", Users],
+              ] as const
+            ).map(([href, text, NavIcon]) => (
+              <a
+                key={href}
+                href={href}
+                className="flex min-w-16 flex-col items-center gap-1 rounded-xl px-2 py-1.5 text-[11px] font-semibold text-muted"
+              >
+                <NavIcon size={20} />
+                {text}
+              </a>
+            ))}
         </div>
       </nav>
     </div>

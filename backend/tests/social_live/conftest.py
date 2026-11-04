@@ -9,6 +9,7 @@ from livepulse.modules.analytics.models import MonitorState, UserRole
 from livepulse.modules.automation import models as automation
 from livepulse.modules.broadcasts.models import Broadcast, RawEvent
 from livepulse.modules.chat import models as chat
+from livepulse.modules.crm import models as crm
 from livepulse.modules.social_live import models as m
 from livepulse.modules.whatsapp import models as whatsapp
 from livepulse.shared.config import settings
@@ -26,7 +27,9 @@ TABLES = [m.TiktokAccount.__table__, m.Tiktoker.__table__, m.Live.__table__,
           automation.FlowStep.__table__, automation.AiAgent.__table__,
           automation.AiKnowledgeDoc.__table__, automation.AiUsage.__table__,
           automation.Broadcast.__table__, automation.BroadcastRecipient.__table__,
-          automation.AutomationAudit.__table__, whatsapp.MirrorEvent.__table__, whatsapp.MirrorReceipt.__table__]
+          automation.AutomationAudit.__table__, whatsapp.MirrorEvent.__table__, whatsapp.MirrorReceipt.__table__,
+          crm.ChatNote.__table__, crm.ChatScheduled.__table__, crm.ChatConsent.__table__,
+          crm.QuickReply.__table__]
 
 
 @pytest.fixture

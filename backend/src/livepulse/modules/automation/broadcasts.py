@@ -24,7 +24,7 @@ MAX_AUDIENCE = 5000
 HARD_STOP = {'broadcasts_disabled', 'test_only', 'daily_cap', 'channel_disabled',
              'channel_unavailable'}
 FILTERS = {'statuses', 'live_ids', 'sources', 'captured_from', 'captured_to',
-           'exclude_contacted_days', 'phones'}
+           'exclude_contacted_days', 'phones', 'require_consent'}
 
 
 def render(body: str, name: str | None) -> str:
@@ -42,6 +42,8 @@ def clean_audience(raw: dict) -> dict:
     audience['statuses'] = [s for s in audience.get('statuses', ['new'])
                             if s in ('new', 'contacted', 'qualified')] or ['new']
     audience['exclude_contacted_days'] = max(0, min(int(audience.get('exclude_contacted_days', 0)), 365))
+    # By default only people who agreed to receive WhatsApp messages (see the CRM panel).
+    audience['require_consent'] = bool(audience.get('require_consent', True))
     return audience
 
 
@@ -50,6 +52,10 @@ async def _audience_query(session, audience: dict, now: datetime):
     query = select(PhoneRegistry.phone, PhoneRegistry.first_username).where(
         PhoneRegistry.status.in_(audience['statuses']),
         ~PhoneRegistry.phone.in_(select(OptOut.phone)))
+    if audience.get('require_consent', True):
+        from ..crm.models import ChatConsent
+        query = query.where(PhoneRegistry.phone.in_(select(ChatConsent.phone).where(
+            ChatConsent.status == 'granted')))
     if audience.get('live_ids'):
         query = query.where(PhoneRegistry.first_live_id.in_(audience['live_ids']))
     if audience.get('sources'):

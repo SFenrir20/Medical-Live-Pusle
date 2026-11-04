@@ -52,6 +52,8 @@ export type LiveApi = {
     views: number;
     /** Highest simultaneous audience sample. Not unique viewers. */
     peak_viewers: number;
+    /** Last audience sample: people watching right now while the LIVE is on. */
+    current_viewers: number | null;
     average_viewers: number | null;
     /** null = no source connected ("no disponible"). */
     unique_viewers: number | null;

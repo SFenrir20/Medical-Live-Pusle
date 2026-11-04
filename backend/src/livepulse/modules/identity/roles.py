@@ -28,9 +28,11 @@ PERMISSIONS: dict[str, set[str]] = {
     'gerente': {*MARKETING, *WA_REVIEW},
     'jefe_marketing': {*MARKETING, *WA_REVIEW},
     # Both screens plus the operational view, to diagnose failures.
-    'supervisor': {'screen:agent', *MARKETING, 'monitor', *CONTACT_MANAGE, *WA_WORK, *WA_REVIEW, 'wa:manage'},
+    'supervisor': {'screen:agent', *MARKETING, 'monitor', *CONTACT_MANAGE, *WA_WORK, *WA_REVIEW, 'wa:manage',
+                   'crm:manage'},
     # Break-glass owner (ADMIN_USER_IDS) in case Clerk metadata is misconfigured.
-    'admin': {'screen:agent', *MARKETING, 'monitor', *CONTACT_MANAGE, 'automation:manage', *WA_WORK, *WA_REVIEW, 'wa:manage'},
+    'admin': {'screen:agent', *MARKETING, 'monitor', *CONTACT_MANAGE, 'automation:manage', *WA_WORK, *WA_REVIEW, 'wa:manage',
+              'crm:manage'},
 }
 
 
