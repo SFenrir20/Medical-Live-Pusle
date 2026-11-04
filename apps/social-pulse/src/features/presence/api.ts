@@ -9,6 +9,10 @@ export type PresenceState = {
   auto_assignment: boolean;
   pending: number;
   heartbeat_seconds: number;
+  session_seconds?: number;
+  active_seconds?: number;
+  idle_since?: string | null;
+  reconnect_required?: boolean;
 };
 
 export type TeamPresence = {
@@ -34,7 +38,7 @@ export type TeamPresenceResponse = {
 
 export async function sendHeartbeat(
   visible: boolean,
-  status?: "available" | "paused",
+  status?: "available" | "paused" | "offline",
 ): Promise<PresenceState> {
   const { data } = await apiClient.post<PresenceState>("/presence/heartbeat", {
     visible,

@@ -49,65 +49,93 @@ def offline_after() -> timedelta:
     return timedelta(seconds=settings.presence_offline_after_s)
 
 
+IDLE_DISCONNECT = timedelta(minutes=15)
+
+
 def is_online(row: AgentPresence, now: datetime) -> bool:
-    return row.last_heartbeat_at is not None and aware_utc(row.last_heartbeat_at) >= now - offline_after()
+    return (not row.reconnect_required and row.last_heartbeat_at is not None
+            and aware_utc(row.last_heartbeat_at) >= now - offline_after()
+            and not (row.idle_since and now >= aware_utc(row.idle_since) + IDLE_DISCONNECT))
 
 
 def is_eligible(row: AgentPresence, now: datetime) -> bool:
-    """Receives new contacts: an agent, connected, and not paused."""
-    return row.role == AGENT_ROLE and row.status == 'available' and is_online(row, now)
+    return (row.role == AGENT_ROLE and row.status == 'available'
+            and row.idle_since is None and is_online(row, now))
 
 
 def state_of(row: AgentPresence | None, now: datetime) -> str:
     if row is None or not is_online(row, now):
         return 'offline'
-    return 'paused' if row.status == 'paused' else 'online'
+    return 'paused' if row.status == 'paused' or row.idle_since else 'online'
 
-
-# ---- heartbeats and sessions --------------------------------------------------------------
 
 async def heartbeat(session, user_id: str, role: str, visible: bool, now: datetime | None = None,
                     status: str | None = None) -> bool:
-    """Register that the person's app is open. Returns True when she just came online."""
+    """Yellow keeps the session; red is latched until an explicit Connect action."""
     now = now or utcnow()
     row = await session.get(AgentPresence, user_id, with_for_update=True)
-    if row is None:
+    fresh = row is None
+    if fresh:
         row = AgentPresence(user_id=user_id, role=role, status='available')
         session.add(row)
         await session.flush()
-    came_online = not is_online(row, now)
-
-    current = (await session.scalars(select(AgentSession).where(
+    was_online = is_online(row, now)
+    previous_green = row.status == 'available' and row.idle_since is None
+    current = await session.scalar(select(AgentSession).where(
         AgentSession.user_id == user_id, AgentSession.ended_at.is_(None))
-        .order_by(AgentSession.id.desc()).limit(1))).first()
-    if current is not None and aware_utc(current.last_heartbeat_at) < now - offline_after():
-        current.ended_at = current.last_heartbeat_at  # it went silent: that session is over
-        current = None
-    if current is None:
-        session.add(AgentSession(user_id=user_id, started_at=now, last_heartbeat_at=now))
-    else:
-        seconds = (now - aware_utc(current.last_heartbeat_at)).total_seconds()
-        seconds = max(0, min(seconds, offline_after().total_seconds()))
+        .order_by(AgentSession.id.desc()).limit(1))
+    # Account only the bounded interval since the previous beat, in its previous state.
+    if current:
+        end = now
+        if not fresh and not was_online:
+            end = aware_utc(current.last_heartbeat_at)
+            if row.idle_since:
+                end = min(now, aware_utc(row.idle_since) + IDLE_DISCONNECT,
+                          aware_utc(current.last_heartbeat_at) + offline_after())
+        seconds = max(0, min((end - aware_utc(current.last_heartbeat_at)).total_seconds(),
+                             offline_after().total_seconds()))
         current.connected_seconds += round(seconds)
-        if visible:
+        if previous_green:
             current.active_seconds += round(seconds)
-        current.last_heartbeat_at = now
-
+        current.last_heartbeat_at = end
+        if not was_online or status == 'offline':
+            current.ended_at = end
+            current = None
+    if not fresh and not was_online:
+        row.reconnect_required = True
+    if row.reconnect_required or status == 'offline':
+        row.status = 'paused'
+    if status == 'offline':
+        row.reconnect_required = True
+    elif status == 'available':
+        row.reconnect_required = False
+        row.status = 'available'
+        row.idle_since = None
+    elif status == 'paused':
+        row.status = 'paused'
     row.role = role
     row.last_heartbeat_at = now
-    if visible:
-        row.last_visible_at = now
-    if status in ('available', 'paused'):
-        row.status = status
-    return came_online
+    if not row.reconnect_required:
+        if visible and row.status == 'available':
+            row.last_visible_at = now
+            row.idle_since = None
+        elif row.idle_since is None:
+            row.idle_since = now
+        if current is None:
+            session.add(AgentSession(user_id=user_id, started_at=now, last_heartbeat_at=now))
+    return not was_online and is_online(row, now)
 
 
 async def close_stale_sessions(session, now: datetime):
-    stale = (await session.scalars(select(AgentSession).where(
-        AgentSession.ended_at.is_(None),
-        AgentSession.last_heartbeat_at < now - offline_after()))).all()
-    for item in stale:
-        item.ended_at = item.last_heartbeat_at
+    rows = (await session.scalars(select(AgentPresence).with_for_update())).all()
+    for row in rows:
+        if is_online(row, now):
+            continue
+        row.reconnect_required = True
+        sessions = (await session.scalars(select(AgentSession).where(
+            AgentSession.user_id == row.user_id, AgentSession.ended_at.is_(None)))).all()
+        for item in sessions:
+            item.ended_at = item.last_heartbeat_at
 
 
 # ---- distribution ------------------------------------------------------------------------
@@ -119,7 +147,7 @@ async def eligible_agents(session, now: datetime) -> list[str]:
         AgentPresence.last_heartbeat_at >= now - offline_after())
         .order_by(AgentPresence.last_assigned_at.is_not(None), AgentPresence.last_assigned_at,
                   AgentPresence.user_id))).all()
-    return [r.user_id for r in rows]
+    return [r.user_id for r in rows if is_eligible(r, now)]
 
 
 async def _move(session, contact: PhoneRegistry, target: str | None, now: datetime,
@@ -188,7 +216,9 @@ async def unavailable_agents(session, now: datetime) -> list[str]:
     rows = (await session.scalars(select(AgentPresence).where(
         AgentPresence.role == AGENT_ROLE))).all()
     return [r.user_id for r in rows
-            if r.status == 'paused' or r.last_heartbeat_at is None
+            if r.status == 'paused'
+            or (r.idle_since and now >= aware_utc(r.idle_since) + IDLE_DISCONNECT)
+            or r.last_heartbeat_at is None
             or aware_utc(r.last_heartbeat_at) < limit]
 
 
@@ -211,17 +241,22 @@ async def run(factory, now: datetime | None = None) -> dict:
 
 class Beat(BaseModel):
     visible: bool = True
-    status: Literal['available', 'paused'] | None = None
+    status: Literal['available', 'paused', 'offline'] | None = None
 
 
 async def _mine(session, who, now) -> dict:
     row = await session.get(AgentPresence, who['user_id'])
     pending = await session.scalar(select(func.count()).select_from(PhoneRegistry).where(
         PhoneRegistry.advisor_id == who['user_id'], PhoneRegistry.status == 'new')) or 0
-    return {'state': state_of(row, now), 'status': row.status if row else 'available',
+    current = await session.scalar(select(AgentSession).where(AgentSession.user_id == who['user_id'],
+        AgentSession.ended_at.is_(None)).order_by(AgentSession.id.desc()).limit(1))
+    return {'session_seconds': current.connected_seconds if current else 0,
+            'active_seconds': current.active_seconds if current else 0, 'state': state_of(row, now), 'status': row.status if row else 'available',
             'receives': bool(row and is_eligible(row, now)) and settings.auto_assignment,
             'auto_assignment': settings.auto_assignment, 'pending': pending,
-            'heartbeat_seconds': 20}
+            'heartbeat_seconds': 20, 'idle_disconnect_seconds': 900,
+            'reconnect_required': bool(row and row.reconnect_required),
+            'idle_since': queries.iso(row.idle_since) if row else None}
 
 
 @router.post('/heartbeat')
@@ -233,7 +268,7 @@ async def beat(body: Beat, who=Depends(worker_scope), session=Depends(get_sessio
     came_online = await heartbeat(session, who['user_id'], who['role'], body.visible, now,
                                   body.status)
     if settings.auto_assignment and who['role'] == AGENT_ROLE:
-        if body.status == 'paused':
+        if body.status in ('paused', 'offline'):
             await redistribute_from(session, [who['user_id']], now)
         elif came_online or body.status == 'available':
             await assign_pool(session, now)  # she is here: what is waiting goes out now

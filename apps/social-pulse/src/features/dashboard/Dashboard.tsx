@@ -1,3 +1,5 @@
+import { useActiveLives } from "./useActiveLives";
+import { PrimaryNav } from "@/features/shell/PrimaryNav";
 import { useEffect, useState } from "react";
 import {
   Activity,
@@ -410,39 +412,25 @@ function MarketingDashboard({ initialView = "Resumen" }: { initialView?: Marketi
       <header className="sticky top-0 z-30 border-b border-line bg-white/95 backdrop-blur">
         <div className="mx-auto flex h-[68px] max-w-[1400px] items-center justify-between px-4 sm:px-6">
           <Logo />
-          <nav className="hidden items-center gap-1 lg:flex">
-            {views.map((item) => (
-              <button
-                type="button"
-                key={item}
-                onClick={() => setView(item)}
-                className={`rounded-xl px-4 py-2.5 text-sm font-semibold transition ${
-                  view === item ? "bg-primary-soft text-primary" : "text-muted hover:bg-slate-50"
-                }`}
-              >
-                {item}
-              </button>
-            ))}
-            {(user?.permissions ?? []).includes("wa:read") &&
-              [
-                ["/whatsapp", "Chats"],
-                ["/crm", "CRM"],
-              ].map(([href, text]) => (
-                <a
-                  key={href}
-                  href={href}
-                  className="rounded-xl px-4 py-2.5 text-sm font-semibold text-muted transition hover:bg-slate-50"
-                >
-                  {text}
-                </a>
-              ))}
-          </nav>
+          <div className="hidden lg:block">
+            <PrimaryNav marketing />
+          </div>
           <div className="flex items-center gap-2">
             <NotificationBell onOpenAlerts={() => setView("Alertas")} />
-            <a href="/integraciones/tiktok" className="rounded-xl px-3 py-2 text-xs font-semibold text-primary">
+            <a
+              href="/integraciones/tiktok"
+              className="rounded-xl px-3 py-2 text-xs font-semibold text-primary"
+            >
               Conectar TikTok
             </a>
-            {user?.permissions.includes("wa:read") && <a href="/whatsapp" className="rounded-xl px-3 py-2 text-xs font-semibold text-primary">WhatsApp</a>}
+            {user?.permissions.includes("wa:read") && (
+              <a
+                href="/bandeja"
+                className="rounded-xl px-3 py-2 text-xs font-semibold text-primary"
+              >
+                Bandeja
+              </a>
+            )}
             <span className="hidden rounded-full bg-violet-50 px-3 py-1.5 text-[11px] font-bold text-violet-700 sm:inline-flex">
               {ROLE_LABEL[user?.role ?? ""] ?? "Marketing"}
             </span>
@@ -494,7 +482,7 @@ function MarketingDashboard({ initialView = "Resumen" }: { initialView?: Marketi
           </p>
         )}
 
-        <div className="mt-6 flex gap-2 overflow-x-auto lg:hidden">
+        <div className="mt-6 flex gap-2 overflow-x-auto">
           {views.map((item) => (
             <button
               type="button"
@@ -509,8 +497,8 @@ function MarketingDashboard({ initialView = "Resumen" }: { initialView?: Marketi
           ))}
           {(user?.permissions ?? []).includes("wa:read") &&
             [
-              ["/whatsapp", "Chats"],
-              ["/crm", "CRM"],
+              ["/bandeja", "Bandeja"],
+              ["/tools", "TOOLS"],
             ].map(([href, text]) => (
               <a
                 key={href}
@@ -607,7 +595,9 @@ function MarketingDashboard({ initialView = "Resumen" }: { initialView?: Marketi
                   </span>
                   <span
                     className={`rounded-full px-3 py-1.5 ${
-                      teamPresence.pool_waiting ? "bg-amber-50 text-amber-700" : "bg-slate-100 text-slate-600"
+                      teamPresence.pool_waiting
+                        ? "bg-amber-50 text-amber-700"
+                        : "bg-slate-100 text-slate-600"
                     }`}
                   >
                     {teamPresence.pool_waiting} esperando agente
@@ -660,7 +650,7 @@ function MarketingDashboard({ initialView = "Resumen" }: { initialView?: Marketi
                         <dd className="font-semibold">{duration(agent.today.connected_seconds)}</dd>
                       </div>
                       <div className="flex justify-between">
-                        <dt className="text-muted">Mirando el CRM hoy</dt>
+                        <dt className="text-muted">Activo en el CRM hoy</dt>
                         <dd className="font-semibold">{duration(agent.today.active_seconds)}</dd>
                       </div>
                       <div className="flex justify-between">
@@ -683,7 +673,8 @@ function MarketingDashboard({ initialView = "Resumen" }: { initialView?: Marketi
                   <article key={agent} className="rounded-2xl border border-line bg-white p-5">
                     <h3 className="font-bold">{agent}</h3>
                     <p className="mt-1 text-xs text-muted">
-                      {statsOf(agent)?.pending ?? 0} pendientes · {statsOf(agent)?.assigned ?? 0} asignados
+                      {statsOf(agent)?.pending ?? 0} pendientes · {statsOf(agent)?.assigned ?? 0}{" "}
+                      asignados
                     </p>
                   </article>
                 ))}
@@ -748,32 +739,16 @@ function MarketingDashboard({ initialView = "Resumen" }: { initialView?: Marketi
         )}
       </main>
 
-      <nav className="sticky bottom-0 z-30 border-t border-line bg-white px-3 py-2 lg:hidden">
-        <div className="mx-auto flex max-w-sm justify-around">
-          {views.map((item) => {
-            const Icon = MARKETING_ICONS[item];
-            return (
-              <button
-                type="button"
-                key={item}
-                onClick={() => setView(item)}
-                className={`flex flex-col items-center gap-1 rounded-xl px-3 py-1.5 text-[11px] font-semibold ${
-                  view === item ? "text-primary" : "text-muted"
-                }`}
-              >
-                <Icon size={20} />
-                {item}
-              </button>
-            );
-          })}
-        </div>
-      </nav>
+      <div className="sticky bottom-0 z-30 border-t border-line bg-white p-2 lg:hidden">
+        <PrimaryNav marketing={true} />
+      </div>
     </div>
   );
 }
 
 function AgentDashboard({ onOpenMarketing }: { onOpenMarketing?: () => void }) {
   const { user, logout } = useAuth();
+  const activeBoard = useActiveLives();
   const [view, setView] = useState<View>("Pulso");
   const [phoneOnly, setPhoneOnly] = useState(true);
   const workspace = useWorkspace(true, phoneOnly);
@@ -814,13 +789,19 @@ function AgentDashboard({ onOpenMarketing }: { onOpenMarketing?: () => void }) {
   const statsOf = (name: string) => board.summary?.agents.find((agent) => agent.name === name);
 
   const goToView = (nextView: View) => {
+    if (nextView !== "Pulso") {
+      window.location.href = { Bandeja: "/bandeja", Contactos: "/contactos", Ajustes: "/ajustes" }[
+        nextView
+      ];
+      return;
+    }
     setView(nextView);
     setPage(1);
     setSelectedId(null);
   };
 
   const showPriority = () => {
-    setView("Bandeja");
+    window.location.href = "/bandeja";
     setPage(1);
   };
 
@@ -1075,10 +1056,15 @@ function AgentDashboard({ onOpenMarketing }: { onOpenMarketing?: () => void }) {
                   ) : (
                     <span className="text-slate-400">No detectado</span>
                   )}
-                  {item.phone && user?.permissions.includes("wa:read") && <a
-                    href={`/whatsapp?phone=${encodeURIComponent(item.phone)}`}
-                    onClick={event => event.stopPropagation()}
-                    className="mt-2 block text-xs font-semibold text-primary">Abrir WhatsApp</a>}
+                  {item.phone && user?.permissions.includes("wa:read") && (
+                    <a
+                      href={`/whatsapp?phone=${encodeURIComponent(item.phone)}`}
+                      onClick={(event) => event.stopPropagation()}
+                      className="mt-2 block text-xs font-semibold text-primary"
+                    >
+                      Abrir WhatsApp
+                    </a>
+                  )}
                 </td>
                 <td className="px-4 py-4">
                   <TypeBadge type={item.type} />
@@ -1179,35 +1165,18 @@ function AgentDashboard({ onOpenMarketing }: { onOpenMarketing?: () => void }) {
           <div className="flex items-center gap-2">
             <Logo />
           </div>
-          <nav className="hidden items-center gap-1 lg:flex">
-            {(["Pulso", "Bandeja", "Contactos", "Ajustes"] as View[]).map((item) => (
-              <button
-                key={item}
-                type="button"
-                onClick={() => goToView(item)}
-                className={`rounded-xl px-4 py-2.5 text-sm font-semibold transition ${
-                  view === item ? "bg-primary-soft text-primary" : "text-muted hover:bg-slate-50"
-                }`}
-              >
-                {item}
-              </button>
-            ))}
-            {(user?.permissions ?? []).includes("wa:read") &&
-              [
-                ["/whatsapp", "Chats"],
-                ["/crm", "CRM"],
-              ].map(([href, text]) => (
-                <a
-                  key={href}
-                  href={href}
-                  className="rounded-xl px-4 py-2.5 text-sm font-semibold text-muted transition hover:bg-slate-50"
-                >
-                  {text}
-                </a>
-              ))}
-          </nav>
+          <div className="hidden lg:block">
+            <PrimaryNav marketing={false} active={view} />
+          </div>
           <div className="relative flex items-center gap-2">
-            {user?.permissions.includes("wa:read") && <a href="/whatsapp" className="rounded-xl px-3 py-2 text-xs font-semibold text-primary">WhatsApp</a>}
+            {user?.permissions.includes("wa:read") && (
+              <a
+                href="/bandeja"
+                className="rounded-xl px-3 py-2 text-xs font-semibold text-primary"
+              >
+                Bandeja
+              </a>
+            )}
             {onShift && (
               <PresenceControl
                 presence={presence}
@@ -1273,45 +1242,13 @@ function AgentDashboard({ onOpenMarketing }: { onOpenMarketing?: () => void }) {
 
             {view === "Pulso" && (
               <>
-                {canHistory && board.lives.some((l) => l.status === "live") && (
-                  <LivesCard lives={board.lives} className="mt-7" />
+                {activeBoard.error && (
+                  <p role="alert" className="mt-4 text-sm text-amber-700">
+                    {activeBoard.error}
+                  </p>
                 )}
                 <div className="mt-7 grid gap-4 lg:grid-cols-[1.45fr_1fr]">
-                  <button
-                    type="button"
-                    onClick={() => setView("Bandeja")}
-                    className="rounded-[24px] bg-deep p-6 text-left text-white shadow-xl shadow-slate-300/30"
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="inline-flex items-center gap-2 text-xs font-bold tracking-wider text-cyan-300">
-                        <span className="size-2 animate-pulse rounded-full bg-cyan-300" />
-                        {activeLive ? "EN VIVO" : "SIN LIVE ACTIVO"}
-                      </span>
-                      <span className="font-mono text-sm text-cyan-100">
-                        {activeLive ? elapsed(activeLive.started_at, now) : "--:--:--"}
-                      </span>
-                    </div>
-                    <div className="mt-7 flex items-center">
-                      <span className="grid size-12 place-items-center rounded-2xl bg-white text-ink">
-                        <Music2 size={21} />
-                      </span>
-                      <span className="ml-4 min-w-0 flex-1">
-                        <strong className="block truncate text-lg">
-                          {activeLive?.account ?? "Sin transmisión"}
-                        </strong>
-                        <span className="mt-1 block text-xs text-slate-400">
-                          {activeLive
-                            ? `Transmitiendo con ${activeLive.tiktoker ?? "nadie asignado"}${
-                                activeLive.responsible_note
-                                  ? ` (${HOST_NOTES[activeLive.responsible_note]})`
-                                  : ""
-                              }`
-                            : "Esperando que una cuenta salga en vivo"}
-                        </span>
-                      </span>
-                      <ChevronRight className="text-slate-500" />
-                    </div>
-                  </button>
+                  <LivesCard lives={activeBoard.lives} />
                   <button
                     type="button"
                     onClick={showPriority}
@@ -1457,7 +1394,7 @@ function AgentDashboard({ onOpenMarketing }: { onOpenMarketing?: () => void }) {
                   key={lead.id}
                   onClick={() => {
                     setSelectedId(lead.id);
-                    setView("Bandeja");
+                    window.location.href = "/bandeja";
                   }}
                   className="rounded-2xl border border-line bg-white p-5 text-left transition hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-lg"
                 >
@@ -1718,48 +1655,9 @@ function AgentDashboard({ onOpenMarketing }: { onOpenMarketing?: () => void }) {
         </>
       )}
 
-      <nav className="sticky bottom-0 z-30 border-t border-line bg-white px-3 py-2 lg:hidden">
-        <div className="mx-auto flex max-w-md justify-around">
-          {[
-            [Activity, "Pulso"],
-            [MessagesSquare, "Bandeja"],
-            [Users, "Contactos"],
-            [Settings, "Ajustes"],
-          ].map(([Icon, label]) => {
-            const NavIcon = Icon as typeof Activity;
-            const active = view === label;
-            return (
-              <button
-                type="button"
-                key={label as string}
-                onClick={() => goToView(label as View)}
-                className={`flex min-w-16 flex-col items-center gap-1 rounded-xl px-2 py-1.5 text-[11px] font-semibold ${
-                  active ? "text-primary" : "text-muted"
-                }`}
-              >
-                <NavIcon size={20} />
-                {label as string}
-              </button>
-            );
-          })}
-          {(user?.permissions ?? []).includes("wa:read") &&
-            (
-              [
-                ["/whatsapp", "Chats", MessageCircle],
-                ["/crm", "CRM", Users],
-              ] as const
-            ).map(([href, text, NavIcon]) => (
-              <a
-                key={href}
-                href={href}
-                className="flex min-w-16 flex-col items-center gap-1 rounded-xl px-2 py-1.5 text-[11px] font-semibold text-muted"
-              >
-                <NavIcon size={20} />
-                {text}
-              </a>
-            ))}
-        </div>
-      </nav>
+      <div className="sticky bottom-0 z-30 border-t border-line bg-white p-2 lg:hidden">
+        <PrimaryNav marketing={false} />
+      </div>
     </div>
   );
 }

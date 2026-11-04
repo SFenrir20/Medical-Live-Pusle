@@ -135,7 +135,7 @@ async def test_rotation_follows_agents_joining_and_leaving(desk):
     # agent 1 leaves (silent for longer than the offline wait plus the grace): the rest keep
     # receiving and what she had pending is handed to them
     for user in ('bea', 'cris'):
-        await desk.beat(user, 200)
+        await desk.beat(user, 200, status='available')
     d = await desk.lead(2)
     result = await desk.tick(201)
     final = await desk.owners()
@@ -145,7 +145,7 @@ async def test_rotation_follows_agents_joining_and_leaving(desk):
 
     # agent 4 joins, agent 2 leaves
     for user in ('cris', 'dani'):
-        await desk.beat(user, 400)
+        await desk.beat(user, 400, status='available')
     e = await desk.lead(4)
     await desk.tick(401)
     final = await desk.owners()
@@ -161,7 +161,7 @@ async def test_pending_contacts_wait_out_the_grace_then_move_but_worked_ones_sta
     await desk.set_status(phones[0], 'contacted')            # she is already chatting with this one
     await desk.beat('bea', 30)
     # ana went quiet at 0: offline after 60 s, but the grace (60 s) has not run out at 100 s
-    await desk.beat('bea', 100)
+    await desk.beat('bea', 100, status='available')
     assert (await desk.tick(100))['redistributed'] == 0
     assert set((await desk.owners(phones)).values()) == {'ana'}
     # at 130 s it has: the two untouched ones move to bea; the one being worked stays with ana
@@ -224,7 +224,7 @@ async def test_sessions_measure_connected_and_active_time(desk):
         (session,) = (await s.scalars(select(m.AgentSession))).all()
     assert session.connected_seconds == 60
     assert session.active_seconds == 40                      # the 20 s with the tab hidden do not count
-    await desk.beat('ana', 400)                              # came back after a long gap: new session
+    await desk.beat('ana', 400, status='available')                              # came back after a long gap: new session
     await desk.tick(401)
     async with desk.factory() as s:
         rows = (await s.scalars(select(m.AgentSession).order_by(m.AgentSession.id))).all()
@@ -281,3 +281,54 @@ async def test_with_auto_assignment_off_nothing_moves(desk, monkeypatch):
     phones = await desk.lead(2)
     assert await desk.tick(1) == {'redistributed': 0, 'assigned': 0}
     assert set((await desk.owners(phones)).values()) == {None}
+
+
+async def test_idle_is_yellow_then_latched_red_and_requires_explicit_reconnect(desk):
+    await desk.beat('ana', 0)
+    await desk.beat('ana', 20, visible=False)
+    async with desk.factory() as s:
+        row = await s.get(m.AgentPresence, 'ana')
+        assert dist.state_of(row, at(20)) == 'paused'
+        assert not dist.is_eligible(row, at(20))
+    # Heartbeats keep arriving while the tab is hidden; they cannot restart the idle deadline.
+    for second in range(40, 921, 20):
+        await desk.beat('ana', second, visible=False)
+    await desk.beat('ana', 940, visible=True)
+    async with desk.factory() as s:
+        row = await s.get(m.AgentPresence, 'ana')
+        assert dist.state_of(row, at(940)) == 'offline'
+        assert row.reconnect_required
+        sessions = (await s.scalars(select(m.AgentSession))).all()
+        assert len(sessions) == 1 and sessions[0].ended_at is not None
+        assert sessions[0].connected_seconds == 920
+        assert sessions[0].active_seconds == 20
+    await desk.beat('ana', 960, visible=True, status='available')
+    async with desk.factory() as s:
+        row = await s.get(m.AgentPresence, 'ana')
+        assert dist.state_of(row, at(960)) == 'online'
+        assert dist.is_eligible(row, at(960))
+        assert len((await s.scalars(select(m.AgentSession))).all()) == 2
+
+
+async def test_activity_before_idle_deadline_recovers_without_new_session(desk):
+    await desk.beat('ana', 0)
+    await desk.beat('ana', 20, visible=False)
+    await desk.beat('ana', 40, visible=True)
+    async with desk.factory() as s:
+        row = await s.get(m.AgentPresence, 'ana')
+        assert dist.state_of(row, at(40)) == 'online'
+        assert row.idle_since is None
+        assert len((await s.scalars(select(m.AgentSession))).all()) == 1
+
+
+async def test_silent_or_manually_disconnected_agent_cannot_rejoin_by_passive_beats(desk):
+    await desk.beat('ana', 0)
+    await desk.tick(100)
+    await desk.beat('ana', 110)
+    async with desk.factory() as s:
+        assert dist.state_of(await s.get(m.AgentPresence, 'ana'), at(110)) == 'offline'
+    await desk.beat('ana', 120, status='available')
+    await desk.beat('ana', 140, status='offline')
+    await desk.beat('ana', 160)
+    async with desk.factory() as s:
+        assert dist.state_of(await s.get(m.AgentPresence, 'ana'), at(160)) == 'offline'

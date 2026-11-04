@@ -47,7 +47,7 @@ export function ContactPanel({
 
   if (!detail)
     return (
-      <aside className="hidden border-l border-line bg-white p-6 text-sm text-muted xl:block">
+      <aside className="hidden border-l border-line bg-white p-6 text-sm text-muted min-[68.75rem]:block">
         La ficha del contacto aparece al abrir una conversación.
       </aside>
     );
@@ -80,9 +80,9 @@ export function ContactPanel({
 
   return (
     <aside className="flex min-h-0 flex-col overflow-y-auto border-l border-line bg-white">
-      <div className="space-y-3 p-5 text-center">
+      <div className="space-y-3 p-4 text-center">
         <div className="flex justify-center">
-          <Avatar name={detail.name} phone={detail.phone} size="size-16" />
+          <Avatar name={detail.name} phone={detail.phone} size="size-14" badge={false} />
         </div>
         <div>
           <h3 className="font-bold">{detail.name || nice(detail.phone)}</h3>
@@ -178,7 +178,10 @@ export function ContactPanel({
             {!detail.tags.length && <span className="text-xs text-muted">Sin etiquetas</span>}
           </div>
           {can && (
-            <>
+            <details>
+              <summary className="mt-2 cursor-pointer text-xs text-primary">
+                Editar etiquetas
+              </summary>
               <form onSubmit={addTag} className="mt-2 flex gap-2">
                 <input
                   aria-label="Nueva etiqueta"
@@ -204,12 +207,45 @@ export function ContactPanel({
                   </button>
                 ))}
               </div>
-            </>
+            </details>
           )}
         </section>
 
-        <section>
-          <p className={label}>Consentimiento WhatsApp</p>
+        <section className="space-y-1 border-t border-line pt-4 text-sm">
+          <a
+            href={`tel:${detail.phone}`}
+            className="flex items-center gap-3 rounded-xl p-2.5 font-medium hover:bg-slate-50"
+          >
+            <Phone size={16} className="text-muted" /> Llamar al contacto
+          </a>
+          <button
+            type="button"
+            disabled={!can}
+            onClick={() => noteBox.current?.focus()}
+            className="flex w-full items-center gap-3 rounded-xl p-2.5 text-left font-medium hover:bg-slate-50 disabled:opacity-40"
+          >
+            <StickyNote size={16} className="text-muted" /> Agregar nota
+          </button>
+          <button
+            type="button"
+            disabled={!canSend || !detail.is_mine}
+            onClick={onSchedule}
+            className="flex w-full items-center gap-3 rounded-xl p-2.5 text-left font-medium hover:bg-slate-50 disabled:opacity-40"
+          >
+            <CalendarClock size={16} className="text-muted" /> Programar mensaje
+          </button>
+          <button
+            type="button"
+            disabled
+            title="Los bots no están conectados al WhatsApp real: se prueban en el simulador de Automatización."
+            className="flex w-full items-center gap-3 rounded-xl p-2.5 text-left font-medium opacity-40"
+          >
+            <Bot size={16} /> Activar automatización
+          </button>
+        </section>
+
+        <details>
+          <summary className={`${label} cursor-pointer`}>Consentimiento WhatsApp</summary>
           <span
             className={`mt-2 inline-block rounded-full px-3 py-1 text-xs font-bold ${consent.style}`}
           >
@@ -258,40 +294,7 @@ export function ContactPanel({
           <p className="mt-2 text-[11px] text-muted">
             Hace falta para campañas y bots. Responder a quien te escribe no lo necesita.
           </p>
-        </section>
-
-        <section className="space-y-1 border-t border-line pt-4 text-sm">
-          <a
-            href={`tel:${detail.phone}`}
-            className="flex items-center gap-3 rounded-xl p-2.5 font-medium hover:bg-slate-50"
-          >
-            <Phone size={16} className="text-muted" /> Llamar al contacto
-          </a>
-          <button
-            type="button"
-            disabled={!can}
-            onClick={() => noteBox.current?.focus()}
-            className="flex w-full items-center gap-3 rounded-xl p-2.5 text-left font-medium hover:bg-slate-50 disabled:opacity-40"
-          >
-            <StickyNote size={16} className="text-muted" /> Agregar nota
-          </button>
-          <button
-            type="button"
-            disabled={!canSend || !detail.is_mine}
-            onClick={onSchedule}
-            className="flex w-full items-center gap-3 rounded-xl p-2.5 text-left font-medium hover:bg-slate-50 disabled:opacity-40"
-          >
-            <CalendarClock size={16} className="text-muted" /> Programar mensaje
-          </button>
-          <button
-            type="button"
-            disabled
-            title="Los bots no están conectados al WhatsApp real: se prueban en el simulador de Automatización."
-            className="flex w-full items-center gap-3 rounded-xl p-2.5 text-left font-medium opacity-40"
-          >
-            <Bot size={16} /> Activar automatización
-          </button>
-        </section>
+        </details>
 
         <section>
           <p className={label}>Notas internas</p>

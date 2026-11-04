@@ -1,3 +1,4 @@
+import { uploadImage } from './images.js';
 import { createServer } from 'node:http';
 import { timingSafeEqual } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
@@ -20,8 +21,12 @@ createServer(async (req, res) => {
   const provided = Buffer.from(req.headers.authorization || '');
   if (provided.length !== secret.length || !timingSafeEqual(secret, provided)) return reply(401, { error: 'unauthorized' });
   try {
+    if (req.method === 'GET' && /^\/images\/[a-f0-9]{64}$/.test(req.url)) {
+      try { return reply(200, await mirror.image(req.url.split('/').pop())); }
+      catch { return reply(503, { error: 'image_unavailable' }); }
+    }
     let raw = '';
-    for await (const part of req) { raw += part; if (raw.length > 32000) return reply(413, { error: 'too_large' }); }
+    for await (const part of req) { raw += part; if (raw.length > (req.url === "/images" ? 12 * 1024 * 1024 : 32000)) return reply(413, { error: 'too_large' }); }
     const data = raw ? JSON.parse(raw) : {};
     if (req.method === 'GET' && req.url === '/status') return reply(200, { ...mirror.status(), rejected: store.rejectedCount() });
     if (req.method === 'GET' && req.url === '/events') return reply(200, store.events());
@@ -38,6 +43,7 @@ createServer(async (req, res) => {
       data.sequences.length <= 100 && data.sequences.every(Number.isSafeInteger)) {
       store.ack(data.sequences); return reply(200, { ok: true });
     }
+    if (req.method === 'POST' && req.url === '/images') return reply(200, uploadImage(store, data.phone, data.data));
     if (req.method === 'POST' && req.url === '/send') return reply(200, await mirror.send(data));
     reply(404, { error: 'not_found' });
   } catch { reply(400, { error: 'request_failed' }); }

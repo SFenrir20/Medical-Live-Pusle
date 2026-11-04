@@ -362,3 +362,16 @@ async def test_campaign_audience_defaults_to_people_who_agreed(world):
     await client.put(f'{CRM}/conversations/{chat}/consent', headers=auth('ana'),
                      json={'status': 'revoked'})
     assert await audience() == 0 and await audience(require_consent=False) == 0   # opted out too
+
+
+async def test_agents_see_active_live_card_without_marketing_history_access(world):
+    client, _ = world
+    response = await client.get(f'{CRM}/active-lives', headers=auth('ana'))
+    assert response.status_code == 200
+    items = response.json()['items']
+    assert len(items) == 1 and items[0]['id'] == 'L1'
+    assert set(items[0]) == {'id', 'status', 'account', 'tiktoker', 'started_at', 'metrics'}
+    assert set(items[0]['metrics']) == {'current_viewers', 'phones_captured'}
+    assert (await client.get('/api/marketing/tiktok/lives', headers=auth('ana'))).status_code == 403
+    assert (await client.get(f'{CRM}/active-lives')).status_code == 401
+    assert (await client.get(f'{CRM}/active-lives', headers=auth('jefa'))).status_code == 200

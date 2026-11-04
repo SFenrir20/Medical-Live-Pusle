@@ -60,8 +60,11 @@ export function ChatsPage() {
   const [opening, setOpening] = useState(false);
   const [error, setError] = useState("");
   const [ficha, setFicha] = useState(false);
+  const [liveOpen, setLiveOpen] = useState(false);
   const [scheduleSignal, setScheduleSignal] = useState(0);
-  const request = useRef<{ id: string; text: string; conversation: number } | null>(null);
+  const request = useRef<{ id: string; text: string; conversation: number; file?: File } | null>(
+    null,
+  );
   const selectedRef = useRef(selected);
   selectedRef.current = selected;
   const seenFor = useRef<number | null>(null);
@@ -214,7 +217,7 @@ export function ChatsPage() {
     setError("");
     try {
       const result = await work();
-      if (result) setDetail(result);
+      if (result && result.id === selectedRef.current) setDetail(result);
       void refreshList().catch(() => undefined);
       return true;
     } catch (e) {
@@ -226,15 +229,22 @@ export function ChatsPage() {
   };
   const id = selected;
 
-  const send = async (text: string): Promise<boolean> => {
+  const send = async (text: string, file?: File): Promise<boolean> => {
     if (!id) return false;
-    if (!request.current || request.current.text !== text || request.current.conversation !== id)
-      request.current = { id: crypto.randomUUID(), text, conversation: id };
+    if (
+      !request.current ||
+      request.current.text !== text ||
+      request.current.conversation !== id ||
+      request.current.file !== file
+    )
+      request.current = { id: crypto.randomUUID(), text, conversation: id, file };
     const requestId = request.current.id;
     setBusy(true);
     setError("");
     try {
-      const message = await chatApi.send(id, requestId, text);
+      const message = file
+        ? await chatApi.sendImage(id, requestId, text, file)
+        : await chatApi.send(id, requestId, text);
       if (selectedRef.current === id) {
         setThread((old) =>
           old
@@ -269,6 +279,7 @@ export function ChatsPage() {
 
   const panel = (
     <ContactPanel
+      key={selected}
       detail={detail}
       thread={thread}
       canSend={maySend}
@@ -297,7 +308,7 @@ export function ChatsPage() {
   );
 
   return (
-    <div className="flex h-screen flex-col bg-canvas text-ink">
+    <div className="flex h-dvh flex-col bg-canvas text-ink">
       <AppNav />
       <div className="space-y-2 px-4 pt-3 sm:px-6">
         <div className="flex flex-wrap items-center gap-3 text-sm">
@@ -320,10 +331,13 @@ export function ChatsPage() {
               Vincular / reconectar
             </button>
           )}
-          <span className="text-xs text-muted">
-            Horas de Lima. No es una integración oficial de Meta: una actualización de WhatsApp
-            puede interrumpirla.
-          </span>
+          <button
+            type="button"
+            onClick={() => setLiveOpen(true)}
+            className="ml-auto rounded-xl border border-line bg-white px-3 py-1.5 text-xs text-primary min-[68.75rem]:hidden"
+          >
+            TikTok LIVE
+          </button>
         </div>
         {error && (
           <p
@@ -375,9 +389,9 @@ export function ChatsPage() {
         )}
       </div>
 
-      <main className="grid min-h-0 flex-1 grid-cols-1 gap-0 p-3 sm:p-4 lg:grid-cols-[320px_minmax(0,1fr)] xl:grid-cols-[320px_minmax(0,1fr)_310px] 2xl:grid-cols-[320px_minmax(0,1fr)_310px_280px]">
+      <main className="mx-3 my-4 grid min-h-0 flex-1 grid-cols-1 overflow-hidden rounded-[24px] border border-line bg-white shadow-sm sm:mx-6 md:grid-cols-[230px_minmax(0,1fr)] min-[68.75rem]:grid-cols-[230px_minmax(300px,1fr)_205px_230px] 2xl:grid-cols-[270px_minmax(0,1fr)_240px_260px]">
         <div
-          className={`min-h-0 overflow-hidden rounded-l-2xl border border-line lg:flex ${selected ? "hidden" : "flex"} [&>aside]:w-full`}
+          className={`min-h-0 overflow-hidden md:flex ${selected ? "hidden" : "flex"} [&>aside]:w-full`}
         >
           <ConversationList
             items={items}
@@ -402,9 +416,10 @@ export function ChatsPage() {
           />
         </div>
         <div
-          className={`min-h-0 overflow-hidden border border-line lg:flex ${selected ? "flex" : "hidden"} [&>section]:w-full`}
+          className={`min-h-0 overflow-hidden md:flex ${selected ? "flex" : "hidden"} [&>section]:w-full`}
         >
           <ChatThread
+            key={selected}
             detail={detail}
             thread={thread}
             status={status}
@@ -440,16 +455,35 @@ export function ChatsPage() {
             }
           />
         </div>
-        <div className="hidden min-h-0 overflow-hidden border border-l-0 border-line xl:flex [&>aside]:w-full">
+        <div className="hidden min-h-0 overflow-hidden min-[68.75rem]:flex [&>aside]:w-full">
           {panel}
         </div>
-        <div className="hidden min-h-0 overflow-hidden rounded-r-2xl border border-l-0 border-line 2xl:flex [&>aside]:w-full">
+        <div className="hidden min-h-0 overflow-hidden min-[68.75rem]:flex [&>aside]:w-full">
           <LivePanel leads={leads} onOpen={(phone) => void openPhone(phone)} opening={opening} />
         </div>
       </main>
 
+      {liveOpen && (
+        <div className="fixed inset-0 z-40 flex flex-col bg-white min-[68.75rem]:hidden">
+          <button
+            type="button"
+            onClick={() => setLiveOpen(false)}
+            className="border-b border-line p-4 text-right text-primary"
+          >
+            Cerrar TikTok LIVE
+          </button>
+          <LivePanel
+            leads={leads}
+            onOpen={(phone) => {
+              setLiveOpen(false);
+              void openPhone(phone);
+            }}
+            opening={opening}
+          />
+        </div>
+      )}
       {ficha && (
-        <div className="fixed inset-0 z-40 flex flex-col bg-white xl:hidden">
+        <div className="fixed inset-0 z-40 flex flex-col bg-white min-[68.75rem]:hidden">
           <div className="flex items-center justify-between border-b border-line p-3">
             <strong>Ficha del contacto</strong>
             <button type="button" onClick={() => setFicha(false)} aria-label="Cerrar ficha">

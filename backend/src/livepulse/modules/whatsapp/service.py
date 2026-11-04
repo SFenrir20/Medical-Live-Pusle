@@ -72,6 +72,9 @@ def validate_event(event):
         body = event.get('body')
         if not isinstance(body, str) or '\x00' in body:
             raise MirrorEventError('invalid_message_text')
+        media_id = event.get('media_id')
+        if media_id is not None and (not isinstance(media_id, str) or not re.fullmatch(r'[a-f0-9]{64}', media_id)):
+            raise MirrorEventError('invalid_media_id')
         name = event.get('name')
         if name is not None and (not isinstance(name, str) or '\x00' in name):
             raise MirrorEventError('invalid_contact_name')
@@ -207,6 +210,8 @@ async def ingest(session, event):
                 if not conversation.last_inbound_at or at > aware(conversation.last_inbound_at):
                     conversation.last_inbound_at = at
         message.external_id = external_id
+        if event.get('media_id'):
+            message.media_id = event['media_id']
         if event['from_me']:
             message.sent_at = message.sent_at or at
             if message.status not in ('delivered', 'read'):
@@ -222,14 +227,14 @@ async def ingest(session, event):
     session.add(MirrorEvent(id=event['id']))
 
 
-async def queue_message(session, conversation, actor, request_id, text):
+async def queue_message(session, conversation, actor, request_id, text, media_id=None):
     previous = await session.scalar(select(ChatMessage).where(ChatMessage.wa_request_id == request_id))
     if previous:
-        if previous.conversation_id != conversation.id or previous.author_id != actor or previous.body != text:
+        if previous.conversation_id != conversation.id or previous.author_id != actor or previous.body != text or previous.media_id != media_id:
             raise HTTPException(409, 'El identificador de envío ya corresponde a otro mensaje.')
         return previous
     message = ChatMessage(conversation_id=conversation.id, direction='out', author_kind='agent',
-        author_id=actor, body=text, status='queued', wa_request_id=request_id, created_at=now())
+        author_id=actor, body=text, media_id=media_id, status='queued', wa_request_id=request_id, created_at=now())
     try:
         async with session.begin_nested():
             session.add(message)
@@ -237,7 +242,7 @@ async def queue_message(session, conversation, actor, request_id, text):
     except IntegrityError:
         previous = await session.scalar(select(ChatMessage).where(ChatMessage.wa_request_id == request_id))
         if (previous and previous.conversation_id == conversation.id
-                and previous.author_id == actor and previous.body == text):
+                and previous.author_id == actor and previous.body == text and previous.media_id == media_id):
             return previous
         raise HTTPException(409, 'El identificador de envío ya corresponde a otro mensaje.') from None
     conversation.bot_active = False
@@ -280,6 +285,8 @@ async def tick(factory):
                 continue
             message.status = 'sending'
             payload = {'request_id': message.wa_request_id, 'phone': conversation.phone, 'text': message.body}
+            if message.media_id:
+                payload['media_id'] = message.media_id
         # Timeout: retain "sending" and query the SAME request id next tick, never a new send.
         result = await gateway.call('/send', payload)
         async with factory() as session, session.begin():
