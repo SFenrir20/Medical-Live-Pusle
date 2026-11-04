@@ -14,7 +14,7 @@ type Appearance = { live_id: string; title: string | null; account_id: string; t
   captured_at: string; sent_at: string | null; seconds_to_send: number | null; source: string | null;
   delivered_at: string | null; read_at: string | null; next_inbound_at: string | null };
 type Detail = Conversation & { messages: Message[]; has_more: boolean; lives: Appearance[] };
-type Status = { state: string; phone?: string | null; qr?: string; detail?: string; unresolved?: number; sync_ok?: boolean; sync_at?: string };
+type Status = { state: string; phone?: string | null; qr?: string; detail?: string; unresolved?: number; rejected?: number; sync_ok?: boolean; sync_at?: string };
 const labels: Record<string, string> = { queued: 'En cola', sending: 'Confirmando envío', sent: 'Enviado',
   delivered: 'Entregado', read: 'Leído', received: 'Recibido', unknown: 'Envío sin confirmar', blocked: 'No enviado' };
 const states: Record<string, string> = { connected: 'Conectado', connecting: 'Conectando', qr: 'Espera vinculación',
@@ -159,6 +159,7 @@ export function WhatsAppInbox() {
         <p className="mt-2 text-sm text-muted">El QR se renueva. Solo supervisores y administradores pueden verlo.</p></div>
     </section>}
     {!!status.unresolved && <p className="mx-auto mb-4 max-w-[1600px] text-sm text-amber-800">Hay mensajes pendientes de identificar por teléfono. El conector reintentará al recibir la correspondencia de WhatsApp.</p>}
+    {!!status.rejected && <p role="alert" className="mx-auto mb-4 max-w-[1600px] rounded-xl bg-amber-50 p-3 text-sm text-amber-800">Hay {status.rejected} mensajes o confirmaciones guardados pendientes de revisión por un error de datos. Contacta al administrador.</p>}
     <section className="mx-auto grid max-w-[1600px] gap-4 lg:grid-cols-[280px_minmax(0,1fr)_300px]">
       <aside className="rounded-2xl border border-line bg-white p-4">
         <h2 className="mb-3 font-bold">Conversaciones</h2>

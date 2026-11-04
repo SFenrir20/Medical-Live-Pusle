@@ -142,3 +142,42 @@ test('optional expected number still validates and unidentified accounts cannot 
   assert.equal(store.get('account'), null);
   assert.equal(restricted.bindAccount(business.slice(1) + '@s.whatsapp.net'), true);
 });
+
+test('bad event moves atomically into encrypted quarantine and can be replayed after restart', () => {
+  const directory = mkdtempSync(join(tmpdir(), 'medical-wa-test-')), path = join(directory, 'store.sqlite');
+  let store;
+  try {
+    store = new Store(path, key);
+    store.event({ type: 'receipt', phone: contact, body: 'private-quarantined-content' });
+    store.event({ type: 'message', body: 'next' });
+    const original = store.events()[0];
+    store.quarantine(original.seq, 'receipt_phone_mismatch');
+    store.quarantine(original.seq, 'receipt_phone_mismatch'); // HTTP response lost: safe repeat.
+    assert.equal(store.rejectedCount(), 1);
+    assert.equal(store.events().length, 1);
+    assert.equal(store.events()[0].body, 'next');
+    assert.deepEqual(store.rejected().map(row => ({ ...row })), [{ seq: original.seq, reason: 'receipt_phone_mismatch' }]);
+    store.close(); store = null;
+    assert.equal(readFileSync(path).includes(Buffer.from('private-quarantined-content')), false);
+    store = new Store(path, key);
+    assert.equal(store.rejectedCount(), 1);
+    assert.equal(store.retryRejected([original.seq]), 1);
+    assert.equal(store.retryRejected([original.seq]), 0);
+    assert.equal(store.rejectedCount(), 0);
+    const replay = store.events().find(e => e.id === original.id);
+    assert.equal(replay.body, original.body);
+    assert.equal(replay.phone, contact);
+    assert.notEqual(replay.seq, original.seq);
+  } finally { store?.close(); rmSync(directory, { recursive: true, force: true }); }
+});
+
+test('failure to preserve an event cannot remove it from the active queue', t => {
+  const { store } = setup(t);
+  store.event({ body: 'keep this message' });
+  const original = store.events()[0];
+  // Simulate a storage error on the preservation step.
+  store.db.exec("CREATE TRIGGER reject_quarantine BEFORE INSERT ON quarantined_events BEGIN SELECT RAISE(ABORT, 'storage error'); END;");
+  assert.throws(() => store.quarantine(original.seq, 'invalid_timestamp'));
+  assert.deepEqual(store.events()[0], original);
+  assert.equal(store.rejectedCount(), 0);
+});

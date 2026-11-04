@@ -1,6 +1,8 @@
 """Real mirror transport, independent of simulator/bots. All sends pass through an outbox."""
+import logging
 import re
 from datetime import datetime, timezone
+from uuid import UUID
 
 from fastapi import HTTPException
 from sqlalchemy import select
@@ -15,6 +17,15 @@ from . import gateway
 from .models import MirrorEvent, MirrorReceipt
 
 CHANNEL = 'whatsapp-principal'
+logger = logging.getLogger(__name__)
+
+
+class MirrorEventError(ValueError):
+    """A permanent event problem, identified without logging contact data or message text."""
+
+    def __init__(self, code):
+        self.code = code
+        super().__init__(code)
 
 
 def now():
@@ -22,10 +33,59 @@ def now():
 
 
 def parse_time(value):
-    result = datetime.fromisoformat(value.replace('Z', '+00:00'))
-    if result.tzinfo is None:
-        raise ValueError('Timestamp must include timezone')
-    return result
+    try:
+        if not isinstance(value, str) or len(value) > 64:
+            raise ValueError
+        result = datetime.fromisoformat(value.replace('Z', '+00:00'))
+        if result.tzinfo is None:
+            raise MirrorEventError('timestamp_without_timezone')
+        return result.astimezone(timezone.utc)
+    except MirrorEventError:
+        raise
+    except (ValueError, TypeError, OverflowError):
+        raise MirrorEventError('invalid_timestamp') from None
+
+
+def validate_event(event):
+    if not isinstance(event, dict):
+        raise MirrorEventError('invalid_event')
+    try:
+        if not isinstance(event.get('id'), str) or len(event['id']) != 36:
+            raise ValueError
+        UUID(event['id'])
+    except ValueError:
+        raise MirrorEventError('invalid_event_id') from None
+    phone = event.get('phone')
+    if not isinstance(phone, str) or not re.fullmatch(r'\+[1-9]\d{7,14}', phone):
+        raise MirrorEventError('invalid_phone')
+    external_id = event.get('external_id')
+    if not isinstance(external_id, str) or not 1 <= len(external_id) <= 128 or '\x00' in external_id:
+        raise MirrorEventError('invalid_message_id')
+    if event.get('type') == 'receipt':
+        if event.get('status') not in ('sent', 'delivered', 'read'):
+            raise MirrorEventError('invalid_receipt_status')
+        if event.get('clock', 'observed') not in ('provider', 'observed'):
+            raise MirrorEventError('invalid_receipt_clock')
+    elif event.get('type') == 'message':
+        if not isinstance(event.get('from_me'), bool):
+            raise MirrorEventError('invalid_message_direction')
+        body = event.get('body')
+        if not isinstance(body, str) or '\x00' in body:
+            raise MirrorEventError('invalid_message_text')
+        name = event.get('name')
+        if name is not None and (not isinstance(name, str) or '\x00' in name):
+            raise MirrorEventError('invalid_contact_name')
+        request_id = event.get('request_id')
+        if request_id is not None:
+            try:
+                if not isinstance(request_id, str) or len(request_id) != 36:
+                    raise ValueError
+                UUID(request_id)
+            except ValueError:
+                raise MirrorEventError('invalid_request_id') from None
+    else:
+        raise MirrorEventError('unknown_event_type')
+    return parse_time(event.get('at'))
 
 
 async def ensure_channel(session):
@@ -97,12 +157,10 @@ async def record_contact(session, message):
 
 
 async def ingest(session, event):
+    at = validate_event(event)
     if await session.get(MirrorEvent, event['id']):
         return
     phone = event['phone']
-    if not re.fullmatch(r'\+[1-9]\d{7,14}', phone):
-        raise ValueError('Invalid phone from mirror')
-    at = parse_time(event['at'])
     external_id = event['external_id']
     if event['type'] == 'receipt':
         receipt = await session.get(MirrorReceipt, external_id)
@@ -110,7 +168,7 @@ async def ingest(session, event):
             receipt = MirrorReceipt(external_id=external_id, phone=phone)
             session.add(receipt)
         if receipt.phone != phone:
-            raise ValueError('Receipt phone mismatch')
+            raise MirrorEventError('receipt_phone_mismatch')
         field = {'sent': 'sent_at', 'delivered': 'delivered_at', 'read': 'read_at'}[event['status']]
         clock_field = {'delivered_at': 'delivered_clock', 'read_at': 'read_clock'}.get(field)
         old = getattr(receipt, field)
@@ -136,7 +194,7 @@ async def ingest(session, event):
         if message is None and request_id and event['from_me']:
             message = await session.scalar(select(ChatMessage).where(ChatMessage.wa_request_id == request_id))
             if message and message.conversation_id != conversation.id:
-                raise ValueError('Outgoing conversation mismatch')
+                raise MirrorEventError('outgoing_conversation_mismatch')
         if message is None:
             message = ChatMessage(conversation_id=conversation.id,
                 direction='out' if event['from_me'] else 'in',
@@ -160,7 +218,7 @@ async def ingest(session, event):
         await apply_receipt(session, message)
         await record_contact(session, message)
     else:
-        raise ValueError('Unknown mirror event')
+        raise MirrorEventError('unknown_event_type')
     session.add(MirrorEvent(id=event['id']))
 
 
@@ -192,8 +250,16 @@ async def tick(factory):
     # Exactly one worker per gateway. Database event commit precedes gateway acknowledgment.
     events = await gateway.call('/events')
     for event in events:
-        async with factory() as session, session.begin():
-            await ingest(session, event)
+        try:
+            async with factory() as session, session.begin():
+                await ingest(session, event)
+        except MirrorEventError as exc:
+            # The failed transaction has rolled back. Move, never discard, the ORIGINAL encrypted
+            # event in the gateway so that later events and outbound messages can make progress.
+            # If preservation fails (or the gateway is an older version), stop without ACK.
+            await gateway.call('/events/quarantine', {'sequence': event['seq'], 'reason': exc.code})
+            logger.warning('WhatsApp event preserved for review (sequence=%d reason=%s)', event['seq'], exc.code)
+            continue
         await gateway.call('/events/ack', {'sequences': [event['seq']]})
     async with factory() as session:
         ids = list((await session.scalars(select(ChatMessage.id).where(

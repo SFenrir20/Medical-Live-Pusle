@@ -5,6 +5,7 @@ import pytest
 from fastapi import HTTPException
 from sqlalchemy import func, select
 
+from livepulse.modules.analytics.models import MonitorState
 from livepulse.modules.chat.models import ChatConversation, ChatMessage
 from livepulse.modules.social_live.models import (
     CapturedPhone,
@@ -14,6 +15,7 @@ from livepulse.modules.social_live.models import (
     TiktokAccount,
 )
 from livepulse.modules.whatsapp import gateway, service
+from livepulse.modules.whatsapp.models import MirrorEvent, MirrorReceipt
 from livepulse.shared import auth as clerk
 
 PHONE = '+51900000001'
@@ -250,3 +252,105 @@ async def test_provider_clock_supersedes_observation_and_cannot_be_overwritten(e
     async with factory() as session:
         message = await session.scalar(select(ChatMessage))
         assert service.aware(message.read_at) == T0 + timedelta(seconds=20)
+
+
+async def test_conflicting_receipt_preserved_without_blocking_next_message_or_send(env, people, monkeypatch, caplog):
+    client, factory = env
+    conversation = await open_chat(client)
+    await claim_chat(client, conversation)
+    await queue(client, conversation)
+    await ingest(factory, event('receipt', status='delivered'))
+    conflict = event('receipt', seq=11, status='read', phone='+51900000002')
+    following = event(seq=12, external_id='next-message', body='Private content must not enter logs')
+    calls = []
+
+    async def fake_call(path, data=None):
+        calls.append((path, data))
+        if path == '/events':
+            return [conflict, following]
+        if path == '/send':
+            return {'state': 'sent', 'external_id': 'sent-after-conflict', 'at': T0.isoformat()}
+        return {'ok': True}
+
+    monkeypatch.setattr(gateway, 'call', fake_call)
+    await service.tick(factory)
+    assert ('/events/quarantine', {'sequence': 11, 'reason': 'receipt_phone_mismatch'}) in calls
+    assert ('/events/ack', {'sequences': [12]}) in calls
+    assert ('/events/ack', {'sequences': [11]}) not in calls
+    async with factory() as session:
+        original = await session.get(MirrorReceipt, 'wa1')
+        assert original.phone == PHONE and original.read_at is None
+        assert await session.get(MirrorEvent, conflict['id']) is None
+        assert await session.get(MirrorEvent, following['id']) is not None
+        assert (await session.scalar(select(ChatMessage).where(ChatMessage.wa_request_id.is_not(None)))).status == 'sent'
+        assert (await session.get(MonitorState, 'whatsapp-worker')).status == 'running'
+    assert 'receipt_phone_mismatch' in caplog.text
+    assert PHONE not in caplog.text and conflict['phone'] not in caplog.text
+    assert following['body'] not in caplog.text
+
+
+async def test_cannot_ack_or_continue_when_preservation_fails(env, people, monkeypatch):
+    _, factory = env
+    bad = event(seq=7, at='invalid private value')
+    calls = []
+
+    async def fake_call(path, data=None):
+        calls.append(path)
+        if path == '/events':
+            return [bad, event(seq=8, external_id='later')]
+        if path == '/events/quarantine':
+            raise gateway.GatewayUnavailable('gateway unavailable or not upgraded')
+        pytest.fail('Must not ACK an unpreserved event')
+
+    monkeypatch.setattr(gateway, 'call', fake_call)
+    with pytest.raises(gateway.GatewayUnavailable):
+        await service.tick(factory)
+    assert calls == ['/events', '/events/quarantine']
+    async with factory() as session:
+        assert await session.scalar(select(func.count()).select_from(ChatMessage)) == 0
+        assert await session.get(MonitorState, 'whatsapp-worker') is None
+
+
+async def test_transient_database_failure_is_retried_not_quarantined(env, monkeypatch):
+    _, factory = env
+    calls = []
+
+    async def fake_call(path, data=None):
+        calls.append(path)
+        assert path == '/events'
+        return [event(seq=1)]
+
+    async def broken_ingest(session, payload):
+        raise RuntimeError('database unavailable')
+
+    monkeypatch.setattr(gateway, 'call', fake_call)
+    monkeypatch.setattr(service, 'ingest', broken_ingest)
+    with pytest.raises(RuntimeError):
+        await service.tick(factory)
+    assert calls == ['/events']
+
+
+@pytest.mark.parametrize(('changes', 'reason'), [
+    ({'at': 'private-invalid-date'}, 'invalid_timestamp'),
+    ({'at': '2026-11-01T15:00:00'}, 'timestamp_without_timezone'),
+    ({'at': None}, 'invalid_timestamp'),
+    ({'at': '+010000-01-01T00:00:00.000Z'}, 'invalid_timestamp'),
+    ({'phone': 'invalid-private-number'}, 'invalid_phone'),
+    ({'phone': None}, 'invalid_phone'),
+    ({'external_id': ''}, 'invalid_message_id'),
+    ({'id': 'bad'}, 'invalid_event_id'),
+    ({'type': 'unexpected'}, 'unknown_event_type'),
+    ({'from_me': 'false'}, 'invalid_message_direction'),
+    ({'body': None}, 'invalid_message_text'),
+    ({'body': 'text\x00with-null'}, 'invalid_message_text'),
+    ({'name': {'invalid': True}}, 'invalid_contact_name'),
+    ({'request_id': 'bad'}, 'invalid_request_id'),
+    ({'type': 'receipt', 'status': 'unknown'}, 'invalid_receipt_status'),
+    ({'type': 'receipt', 'status': 'read', 'clock': 'unknown'}, 'invalid_receipt_clock'),
+])
+async def test_invalid_event_has_safe_reason_and_no_partial_writes(env, changes, reason):
+    _, factory = env
+    with pytest.raises(service.MirrorEventError, match=f'^{reason}$'):
+        await ingest(factory, event(**changes))
+    async with factory() as session:
+        assert await session.scalar(select(func.count()).select_from(ChatMessage)) == 0
