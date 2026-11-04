@@ -23,8 +23,16 @@ createServer(async (req, res) => {
     let raw = '';
     for await (const part of req) { raw += part; if (raw.length > 32000) return reply(413, { error: 'too_large' }); }
     const data = raw ? JSON.parse(raw) : {};
-    if (req.method === 'GET' && req.url === '/status') return reply(200, mirror.status());
+    if (req.method === 'GET' && req.url === '/status') return reply(200, { ...mirror.status(), rejected: store.rejectedCount() });
     if (req.method === 'GET' && req.url === '/events') return reply(200, store.events());
+    if (req.method === 'GET' && req.url === '/events/rejected') return reply(200, store.rejected());
+    if (req.method === 'POST' && req.url === '/events/quarantine') {
+      store.quarantine(data.sequence, data.reason); return reply(200, { ok: true });
+    }
+    if (req.method === 'POST' && req.url === '/events/retry' && Array.isArray(data.sequences) &&
+      data.sequences.length <= 100 && data.sequences.every(n => Number.isSafeInteger(n) && n > 0)) {
+      return reply(200, { restored: store.retryRejected(data.sequences) });
+    }
     if (req.method === 'POST' && req.url === '/connect') { mirror.connect(); return reply(200, mirror.status()); }
     if (req.method === 'POST' && req.url === '/events/ack' && Array.isArray(data.sequences) &&
       data.sequences.length <= 100 && data.sequences.every(Number.isSafeInteger)) {

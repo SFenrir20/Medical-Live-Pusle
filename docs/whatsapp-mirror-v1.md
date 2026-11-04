@@ -124,6 +124,10 @@ teléfono ya existente.
   permanece; solo se renueva la autenticación del dispositivo.
 - Pendientes de identificar: WhatsApp envió un identificador LID sin teléfono. Se guardan cifrados
   y se reintentan cuando llega la correspondencia. No se interpreta un LID numérico como teléfono.
+- Mensajes o confirmaciones pendientes de revisión: un evento tiene datos inválidos o una
+  identidad contradictoria. Se conserva completo y cifrado en `quarantined_events`, sin marcarlo
+  como importado. Los eventos posteriores siguen procesándose. El contador en pantalla permanece
+  visible aunque el worker vuelva a sincronizar correctamente.
 - Para desvincular, usar **Dispositivos vinculados** en el teléfono y cerrar el dispositivo de
   Social Pulse. El conector detectará el cierre. No borrar el volumen para resolver un timeout:
   contiene las claves que evitan duplicados.
@@ -136,6 +140,40 @@ Ejemplo de inspección, adaptando nombres de proyecto si se usa Dokploy:
 ```sh
 docker compose --env-file .env -f infra/compose.yaml --profile whatsapp logs --tail 100 wa-gateway wa-worker
 ```
+
+### Recuperación de un bucle `WhatsApp sync will retry (ValueError)`
+
+Ese registro antiguo solo da la clase de error. No identifica qué dato falló. Un evento rechazado
+podía quedarse al inicio de la cola e impedir las siguientes importaciones; reiniciar repetía el
+mismo intento. La corrección incorpora validación con motivos seguros y preservación del evento
+en una cola de revisión, sin eliminar su contenido ni asociarlo a otro contacto.
+
+Desplegar **gateway y worker actualizados juntos**, además del frontend para mostrar el contador.
+No se necesita otra migración PostgreSQL: el gateway crea su tabla de revisión automáticamente
+en el volumen existente. Conservar ese volumen y sus claves. Si el gateway aún es antiguo y no
+acepta guardar el evento para revisión, el worker se detiene sin confirmarlo ni eliminarlo.
+
+Los logs nuevos indican `sequence` y `reason`, por ejemplo `invalid_timestamp`, `invalid_phone`,
+`receipt_phone_mismatch` u `outgoing_conversation_mismatch`. No incluyen teléfonos, cuerpos ni
+credenciales. Una caída de PostgreSQL o de la red sigue siendo reintentable; no se trata como un
+evento inválido ni se elimina de la cola.
+
+Para consultar los primeros 100 eventos pendientes de revisión (solo secuencias y motivos),
+desde el VPS, adaptando el nombre del contenedor si cambió:
+
+```sh
+sudo docker exec medical-livepulse-deploy-vxzqh4-wa-worker-1 python -c "import asyncio; from livepulse.modules.whatsapp.gateway import call; print(asyncio.run(call('/events/rejected')))"
+```
+
+Después de corregir la causa, un administrador puede reponer una secuencia concreta en la cola.
+Sustituir `123` por una secuencia de la consulta anterior; no ejecutar un reintento masivo a ciegas:
+
+```sh
+sudo docker exec medical-livepulse-deploy-vxzqh4-wa-worker-1 python -c "import asyncio; from livepulse.modules.whatsapp.gateway import call; print(asyncio.run(call('/events/retry', {'sequences': [123]})))"
+```
+
+La reposición conserva el UUID original para impedir duplicados. Si el dato sigue siendo inválido,
+volverá a quedar guardado para revisión. No borrar la cola ni el volumen para quitar el aviso.
 
 Las credenciales Signal, eventos pendientes y registros de envío del gateway se cifran por valor
 con AES-256-GCM. El volumen SQLite no se cifra como dispositivo completo. Los mensajes del CRM

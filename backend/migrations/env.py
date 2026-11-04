@@ -13,9 +13,9 @@ import livepulse.modules.analytics.models  # noqa: F401
 import livepulse.modules.automation.models  # noqa: F401
 import livepulse.modules.broadcasts.models  # noqa: F401
 import livepulse.modules.chat.models  # noqa: F401
-import livepulse.modules.whatsapp.models  # noqa: F401
 import livepulse.modules.social_live.models  # noqa: F401
 import livepulse.modules.tiktok_oauth.models  # noqa: F401
+import livepulse.modules.whatsapp.models  # noqa: F401
 import livepulse.shared.retired_models  # noqa: F401
 from livepulse.shared.config import settings
 from livepulse.shared.db import Base

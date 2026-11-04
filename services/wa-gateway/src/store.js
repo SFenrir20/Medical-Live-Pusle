@@ -13,6 +13,7 @@ export class Store {
       CREATE TABLE IF NOT EXISTS auth (key TEXT PRIMARY KEY, value BLOB NOT NULL);
       CREATE TABLE IF NOT EXISTS pending (key TEXT PRIMARY KEY, value BLOB NOT NULL);
       CREATE TABLE IF NOT EXISTS metadata (key TEXT PRIMARY KEY, value BLOB NOT NULL);
+      CREATE TABLE IF NOT EXISTS quarantined_events (seq INTEGER PRIMARY KEY, reason TEXT NOT NULL, value BLOB NOT NULL);
       CREATE TABLE IF NOT EXISTS events (seq INTEGER PRIMARY KEY AUTOINCREMENT, value BLOB NOT NULL);`);
     const check = this.db.prepare("SELECT value FROM metadata WHERE key='key-check'").get();
     if (check) {
@@ -65,6 +66,38 @@ export class Store {
   }
   ack(sequences) {
     this.transaction(() => { for (const seq of sequences) this.db.prepare('DELETE FROM events WHERE seq=?').run(seq); });
+  }
+  quarantine(sequence, reason) {
+    if (!Number.isSafeInteger(sequence) || sequence <= 0 || typeof reason !== 'string' ||
+      !/^[a-z_]{1,64}$/.test(reason)) throw new Error('invalid_quarantine');
+    this.transaction(() => {
+      const row = this.db.prepare('SELECT value FROM events WHERE seq=?').get(sequence);
+      if (row) {
+        // Preserve the ciphertext verbatim; the worker never has to send the message body back.
+        this.db.prepare('INSERT INTO quarantined_events(seq,reason,value) VALUES (?,?,?)').run(sequence, reason, row.value);
+        this.db.prepare('DELETE FROM events WHERE seq=?').run(sequence);
+      } else if (!this.db.prepare('SELECT seq FROM quarantined_events WHERE seq=?').get(sequence)) {
+        throw new Error('event_not_found');
+      }
+    });
+  }
+  rejectedCount() { return this.db.prepare('SELECT count(*) AS n FROM quarantined_events').get().n; }
+  rejected() {
+    return this.db.prepare('SELECT seq,reason FROM quarantined_events ORDER BY seq LIMIT 100').all();
+  }
+  retryRejected(sequences) {
+    let restored = 0;
+    this.transaction(() => {
+      for (const seq of sequences) {
+        const row = this.db.prepare('SELECT value FROM quarantined_events WHERE seq=?').get(seq);
+        if (!row) continue;
+        // Keep the original event UUID so a repeated import still cannot duplicate a message.
+        this.db.prepare('INSERT INTO events(value) VALUES (?)').run(row.value);
+        this.db.prepare('DELETE FROM quarantined_events WHERE seq=?').run(seq);
+        restored++;
+      }
+    });
+    return restored;
   }
   auth() {
     const creds = this.get('creds', 'auth') || initAuthCreds();
