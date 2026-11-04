@@ -84,6 +84,7 @@ class ChatMessage(Base):
     error = Column(String(200))
     external_id = Column(String(128))                         # provider message id (idempotency)
     wa_request_id = Column(String(36), unique=True)
+    media_id = Column(String(64))
     sent_at = Column(DateTime(timezone=True))
     delivered_at = Column(DateTime(timezone=True))
     read_at = Column(DateTime(timezone=True))

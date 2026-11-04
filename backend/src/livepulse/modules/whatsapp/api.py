@@ -1,6 +1,10 @@
+import base64
+import io
+import warnings
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile
+from PIL import Image, UnidentifiedImageError
 from pydantic import BaseModel, Field
 from sqlalchemy import case, func, or_, select, update
 from sqlalchemy.orm import aliased
@@ -36,7 +40,7 @@ def item(conversation, registry=None):
 def message_item(message):
     return {'id': message.id, 'direction': message.direction, 'author_kind': message.author_kind,
             'author_id': message.author_id, 'body': message.body, 'status': message.status,
-            'error': message.error, 'at': aware(message.created_at),
+            'error': message.error, 'at': aware(message.created_at), 'has_image': bool(message.media_id),
             'sent_at': aware(message.sent_at), 'delivered_at': aware(message.delivered_at),
             'read_at': aware(message.read_at), 'observed_at': aware(message.observed_at)}
 
@@ -184,5 +188,59 @@ async def send(conversation_id: int, body: Outgoing, who=Depends(sender), sessio
     if not body.text.strip():
         raise HTTPException(422, 'Escribe un mensaje.')
     message = await service.queue_message(session, conversation, who['user_id'], str(body.request_id), body.text.strip())
+    await session.commit()
+    return message_item(message)
+
+
+MAX_IMAGE = 8 * 1024 * 1024
+
+
+@router.get('/messages/{message_id}/image')
+async def image(message_id: int, who=Depends(reader), session=Depends(get_session)):
+    message = await session.get(ChatMessage, message_id)
+    if message is None or not message.media_id:
+        raise HTTPException(404, 'Imagen no encontrada.')
+    conversation, _ = await access(session, message.conversation_id, who)
+    try:
+        data = await gateway.call('/images/' + message.media_id)
+        if data.get('phone') != conversation.phone:
+            raise HTTPException(502, 'La imagen no corresponde a esta conversación.')
+        if data.get('mime') not in ('image/jpeg', 'image/png', 'image/webp'):
+            raise HTTPException(502, 'Formato de imagen no compatible.')
+        content = base64.b64decode(data['data'], validate=True)
+        if len(content) > MAX_IMAGE:
+            raise HTTPException(413, 'La imagen supera los 8 MB.')
+    except gateway.GatewayUnavailable as exc:
+        raise HTTPException(503, 'No se pudo recuperar la imagen. Reintenta; puede haber vencido en WhatsApp.') from exc
+    return Response(content, media_type=data['mime'], headers={
+        'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff',
+        'Content-Disposition': 'inline'})
+
+
+@router.post('/conversations/{conversation_id}/images', status_code=202)
+async def send_image(conversation_id: int, request_id: UUID = Form(...),
+                     text: str = Form('', max_length=4000), file: UploadFile = File(...),
+                     who=Depends(sender), session=Depends(get_session)):
+    conversation, _ = await access(session, conversation_id, who, own=True)
+    content = await file.read(MAX_IMAGE + 1)
+    if len(content) > MAX_IMAGE:
+        raise HTTPException(413, 'La imagen supera los 8 MB.')
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter('error', Image.DecompressionBombWarning)
+            with Image.open(io.BytesIO(content)) as img:
+                if img.format not in ('JPEG', 'PNG', 'WEBP') or img.width * img.height > 40_000_000:
+                    raise ValueError
+                img.verify()
+    except (UnidentifiedImageError, ValueError, OSError, Image.DecompressionBombError,
+            Image.DecompressionBombWarning):
+        raise HTTPException(422, 'Selecciona una imagen JPG, PNG o WebP válida (hasta 40 megapíxeles).') from None
+    try:
+        stored = await gateway.call('/images', {'phone': conversation.phone,
+                                               'data': base64.b64encode(content).decode('ascii')})
+    except gateway.GatewayUnavailable as exc:
+        raise HTTPException(503, 'No se pudo guardar la imagen; vuelve a intentar.') from exc
+    message = await service.queue_message(session, conversation, who['user_id'], str(request_id),
+                                           text.strip(), media_id=stored['media_id'])
     await session.commit()
     return message_item(message)

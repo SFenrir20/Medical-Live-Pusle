@@ -290,6 +290,8 @@ class AgentPresence(Base):
     last_heartbeat_at = Column(DateTime(timezone=True))
     last_visible_at = Column(DateTime(timezone=True))
     last_assigned_at = Column(DateTime(timezone=True))
+    idle_since = Column(DateTime(timezone=True))
+    reconnect_required = Column(Boolean, nullable=False, server_default=text('false'))
 
     __table_args__ = (
         CheckConstraint("status IN ('available','paused')", name='ck_agent_presence_status'),

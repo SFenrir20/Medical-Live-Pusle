@@ -439,6 +439,17 @@ async def delete_quick_reply(reply_id: int, who=Depends(manager), session=Depend
     await session.commit()
 
 
+@router.get('/active-lives')
+async def active_lives(who=Depends(reader), session=Depends(get_session)):
+    """Operational card for agents and managers; no historic reports or contact identities."""
+    from ..social_live.queries import list_lives
+    result = await list_lives(session, limit=100, offset=0, status='live')
+    return {'items': [{
+        **{key: item[key] for key in ('id', 'status', 'account', 'tiktoker', 'started_at')},
+        'metrics': {key: item['metrics'][key] for key in ('current_viewers', 'phones_captured')},
+    } for item in result['items']]}
+
+
 # ---- contacts table and summary -------------------------------------------------------------
 
 def registry_visibility(who):
