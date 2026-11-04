@@ -1,6 +1,7 @@
 import base64
 import io
 import warnings
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile
@@ -218,8 +219,9 @@ async def image(message_id: int, who=Depends(reader), session=Depends(get_sessio
 
 
 @router.post('/conversations/{conversation_id}/images', status_code=202)
-async def send_image(conversation_id: int, request_id: UUID = Form(...),
-                     text: str = Form('', max_length=4000), file: UploadFile = File(...),
+async def send_image(conversation_id: int, request_id: Annotated[UUID, Form()],
+                     file: Annotated[UploadFile, File()],
+                     text: Annotated[str, Form(max_length=4000)] = '',
                      who=Depends(sender), session=Depends(get_session)):
     conversation, _ = await access(session, conversation_id, who, own=True)
     content = await file.read(MAX_IMAGE + 1)
