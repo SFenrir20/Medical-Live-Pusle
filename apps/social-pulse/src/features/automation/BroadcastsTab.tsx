@@ -217,6 +217,7 @@ export function BroadcastsTab({
   });
   const [statuses, setStatuses] = useState<string[]>(["new"]);
   const [excludeDays, setExcludeDays] = useState(0);
+  const [requireConsent, setRequireConsent] = useState(true);
   const [preview, setPreview] = useState<{
     count: number;
     sample: { phone: string; name: string | null }[];
@@ -234,7 +235,11 @@ export function BroadcastsTab({
     void load();
   }, [load]);
 
-  const audience = { statuses, exclude_contacted_days: excludeDays };
+  const audience = {
+    statuses,
+    exclude_contacted_days: excludeDays,
+    require_consent: requireConsent,
+  };
   const channel = channels.find((c) => c.id === form.channel_id);
   const channelOff = channel && !channel.policy.broadcasts_enabled;
 
@@ -363,6 +368,10 @@ export function BroadcastsTab({
                 Ver a cuántas personas llega
               </button>
             </div>
+            <label className="mt-3 flex items-center gap-2 text-xs text-ink">
+              <input type="checkbox" checked={requireConsent} onChange={(e) => setRequireConsent(e.target.checked)} />
+              Solo contactos que autorizaron WhatsApp (se marca en la ficha del contacto)
+            </label>
             <p className="mt-2 text-[11px] text-muted">
               Siempre se excluye a quien pidió no recibir mensajes.
             </p>

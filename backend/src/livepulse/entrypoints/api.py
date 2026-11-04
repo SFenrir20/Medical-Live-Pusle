@@ -5,6 +5,7 @@ from ..modules.analytics.api import router as analytics_router
 from ..modules.analytics.ocr import router as ocr_router
 from ..modules.automation.api import router as automation_router
 from ..modules.chat.api import router as chat_router
+from ..modules.crm.api import router as crm_router
 from ..modules.identity.api import router as identity_router
 from ..modules.social_live.alerts_api import router as alerts_router
 from ..modules.social_live.api import marketing as marketing_router
@@ -30,6 +31,7 @@ app.include_router(audience_router)
 app.include_router(presence_router)
 app.include_router(chat_router)
 app.include_router(whatsapp_router)
+app.include_router(crm_router)
 app.include_router(automation_router)
 app.include_router(tiktok_oauth_router)
 app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins,

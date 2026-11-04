@@ -436,7 +436,7 @@ async def test_broadcast_lifecycle_on_the_simulator(world):
     await patient_says(client, 'BAJA', phones[0])             # one person already opted out
     body = {'name': 'Prueba', 'channel_id': 'simulador',
             'body': 'Hola {{nombre|paciente}}, ¿sigues interesada en tu valoración?',
-            'audience': {'statuses': ['new']}}
+            'audience': {'statuses': ['new'], 'require_consent': False}}
     preview = await client.post(f'{AUTO}/broadcasts/preview', headers=person('root'),
                                 json={'audience': body['audience']})
     assert preview.json()['count'] == 6                       # the opted-out one is not in it
@@ -475,7 +475,7 @@ async def test_broadcast_on_the_mirror_pauses_itself_when_the_policy_forbids_it(
                       json={'id': 'espejo', 'kind': 'whatsapp_mirror', 'name': 'Espejo'})
     created = await client.post(f'{AUTO}/broadcasts', headers=person('root'), json={
         'name': 'Muestra', 'channel_id': 'espejo', 'body': 'Hola',
-        'audience': {'phones': phones}})
+        'audience': {'phones': phones, 'require_consent': False}})
     bid = created.json()['id']
     await client.post(f'{AUTO}/broadcasts/{bid}/start', headers=person('root'),
                       json={'confirm_total': 3})

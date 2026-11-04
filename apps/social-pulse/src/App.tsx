@@ -5,7 +5,8 @@ import { BrandLogo } from "@/features/auth/BrandLogo";
 import { LoginScreen } from "@/features/auth/LoginScreen";
 import { Dashboard } from "@/features/dashboard/Dashboard";
 import { TikTokConnection } from "@/features/integrations/TikTokConnection";
-import { WhatsAppInbox } from "@/features/whatsapp/WhatsAppInbox";
+import { ChatsPage } from "@/features/chats/ChatsPage";
+import { CrmPage } from "@/features/crm/CrmPage";
 
 function AccessProblem({
   message,
@@ -72,7 +73,8 @@ export default function App() {
   }
 
   if (!isAuthenticated) return <LoginScreen />;
-  if (window.location.pathname === "/whatsapp") return <WhatsAppInbox />;
+  if (window.location.pathname === "/whatsapp") return <ChatsPage />;
+  if (window.location.pathname === "/crm") return <CrmPage />;
   return window.location.pathname === "/integraciones/tiktok" ? (
     <TikTokConnection />
   ) : (

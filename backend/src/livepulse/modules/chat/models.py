@@ -52,6 +52,10 @@ class ChatConversation(Base):
     registry_id = Column(PK_BIG)                             # phone_registry.id when it is known
     advisor_id = Column(String(64))
     tags = Column(JSON, nullable=False, default=list)
+    # CRM: the stage lives on the contact when there is one; this is only for a WhatsApp-only number.
+    stage = Column(String(10), nullable=False, server_default='new')
+    result = Column(String(20))
+    archived = Column(Boolean, nullable=False, server_default=text('false'))
     # The bot may answer only while this is true and now is past bot_paused_until. A person
     # writing in the conversation pauses it (human takeover).
     bot_active = Column(Boolean, nullable=False, server_default=text('true'))
