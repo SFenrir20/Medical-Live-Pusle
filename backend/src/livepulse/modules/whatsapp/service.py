@@ -1,11 +1,12 @@
 """Real mirror transport, independent of simulator/bots. All sends pass through an outbox."""
 import logging
 import re
-from datetime import datetime, timezone
+import time
+from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 
 from ..analytics.models import MonitorState
@@ -46,6 +47,25 @@ def parse_time(value):
         raise MirrorEventError('invalid_timestamp') from None
 
 
+MEDIA_KINDS = ('image', 'voice', 'audio', 'video', 'document', 'sticker')
+NO_MEDIA = 'none'  # an old placeholder that cannot be recovered
+
+
+def _whole(value, high):
+    return value is None or (isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= high)
+
+
+def validate_media(event):
+    kind = event.get('media_kind')
+    if kind is not None and kind not in MEDIA_KINDS:
+        raise MirrorEventError('invalid_media_kind')
+    if not _whole(event.get('media_seconds'), 86400) or not _whole(event.get('media_size'), 2**31 - 1):
+        raise MirrorEventError('invalid_media_details')
+    name = event.get('media_name')
+    if name is not None and (not isinstance(name, str) or len(name) > 200 or re.search(r'[\x00-\x1f]', name)):
+        raise MirrorEventError('invalid_media_name')
+
+
 def validate_event(event):
     if not isinstance(event, dict):
         raise MirrorEventError('invalid_event')
@@ -75,6 +95,7 @@ def validate_event(event):
         media_id = event.get('media_id')
         if media_id is not None and (not isinstance(media_id, str) or not re.fullmatch(r'[a-f0-9]{64}', media_id)):
             raise MirrorEventError('invalid_media_id')
+        validate_media(event)
         name = event.get('name')
         if name is not None and (not isinstance(name, str) or '\x00' in name):
             raise MirrorEventError('invalid_contact_name')
@@ -212,6 +233,11 @@ async def ingest(session, event):
         message.external_id = external_id
         if event.get('media_id'):
             message.media_id = event['media_id']
+            # Events from before this field existed only ever carried images.
+            message.media_kind = event.get('media_kind') or 'image'
+            message.media_seconds = event.get('media_seconds')
+            message.media_name = event.get('media_name')
+            message.media_size = event.get('media_size')
         if event['from_me']:
             message.sent_at = message.sent_at or at
             if message.status not in ('delivered', 'read'):
@@ -234,7 +260,8 @@ async def queue_message(session, conversation, actor, request_id, text, media_id
             raise HTTPException(409, 'El identificador de envío ya corresponde a otro mensaje.')
         return previous
     message = ChatMessage(conversation_id=conversation.id, direction='out', author_kind='agent',
-        author_id=actor, body=text, media_id=media_id, status='queued', wa_request_id=request_id, created_at=now())
+        author_id=actor, body=text, media_id=media_id, media_kind='image' if media_id else None,
+        status='queued', wa_request_id=request_id, created_at=now())
     try:
         async with session.begin_nested():
             session.add(message)
@@ -249,6 +276,46 @@ async def queue_message(session, conversation, actor, request_id, text, media_id
     conversation.last_message_at = now()
     await session.flush()
     return message
+
+
+PLACEHOLDERS = ('Imagen', 'Video', 'Audio', 'Documento', 'Sticker')
+ADOPT_BATCH = 10
+ADOPT_DAYS = 45
+
+
+async def adopt_old_media(factory) -> int:
+    """Messages saved before attachments were supported say "[Audio: consultar en el teléfono]".
+    The connector still holds the original message, so ask it to attach the file again while
+    WhatsApp still serves it. What cannot be recovered is marked so it is not asked again."""
+    since = now() - timedelta(days=ADOPT_DAYS)
+    async with factory() as session:
+        rows = (await session.execute(select(ChatMessage.id, ChatMessage.external_id, ChatConversation.phone)
+            .join(ChatConversation, ChatConversation.id == ChatMessage.conversation_id).where(
+            ChatMessage.media_id.is_(None), ChatMessage.media_kind.is_(None),
+            ChatMessage.external_id.is_not(None), ChatMessage.created_at >= since,
+            or_(*[ChatMessage.body.like(f'[{label}: consultar en el teléfono]%') for label in PLACEHOLDERS]))
+            .order_by(ChatMessage.id.desc()).limit(ADOPT_BATCH))).all()
+    done = 0
+    for message_id, external_id, phone in rows:
+        result = await gateway.call('/media/adopt', {'phone': phone, 'external_id': external_id})
+        async with factory() as session, session.begin():
+            message = await session.get(ChatMessage, message_id, with_for_update=True)
+            if message.media_kind is not None or message.media_id is not None:
+                continue
+            if result.get('adopted') and re.fullmatch(r'[a-f0-9]{64}', str(result.get('media_id'))) \
+                    and result.get('media_kind') in MEDIA_KINDS:
+                message.media_id, message.media_kind = result['media_id'], result['media_kind']
+                seconds, size = result.get('media_seconds'), result.get('media_size')
+                message.media_seconds = seconds if _whole(seconds, 86400) else None
+                message.media_size = size if _whole(size, 2**31 - 1) else None
+                name = result.get('media_name')
+                message.media_name = name[:200] if isinstance(name, str) and not re.search(r'[\x00-\x1f]', name) else None
+                # keep only the caption the sender wrote, not the placeholder text
+                message.body = message.body.split(']', 1)[1].lstrip('\n') if ']' in message.body else ''
+                done += 1
+            else:
+                message.media_kind = NO_MEDIA
+    return done
 
 
 async def tick(factory):
@@ -270,7 +337,12 @@ async def tick(factory):
         ids = list((await session.scalars(select(ChatMessage.id).where(
             ChatMessage.wa_request_id.is_not(None), ChatMessage.status.in_(['queued', 'sending']))
             .order_by(ChatMessage.id).limit(25))).all())
+    # Return to inbound import regularly even when the outbox is full. One send
+    # may consume its 45s transport budget; do not then start 24 more slow sends.
+    send_deadline = time.monotonic() + 15
     for message_id in ids:
+        if time.monotonic() >= send_deadline:
+            break
         async with factory() as session, session.begin():
             message = await session.get(ChatMessage, message_id, with_for_update=True)
             if message.status not in ('queued', 'sending'):

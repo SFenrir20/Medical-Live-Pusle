@@ -90,7 +90,7 @@ async def test_visibility_follows_ownership_and_roles(world):
     assert [i['phone'] for i in ana['items']] == [CHAT_PHONE]      # free: visible to every agent
     assert ana['items'][0]['unread'] == 1 and ana['items'][0]['name'] == 'Rosa'
     assert ana['items'][0]['last']['body'] == 'Hola, ¿tienen citas?'
-    assert ana['counts'] == {'all': 1, 'mine': 0, 'unread': 1, 'archived': 0}
+    assert ana['counts'] == {'all': 1, 'mine': 0, 'unread': 1, 'waiting': 1, 'unassigned': 1, 'archived': 0}
 
     await claim(client, chat)
     bea = (await client.get(f'{CRM}/conversations', headers=auth('bea'))).json()

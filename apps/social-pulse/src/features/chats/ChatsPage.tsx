@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { X } from "lucide-react";
+import { AlertTriangle, ChevronDown, X } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { AppNav } from "@/features/shell/AppNav";
 import {
@@ -16,11 +16,13 @@ import {
   Thread,
   WaStatus,
 } from "./api";
+import { ChatsHome } from "./ChatsHome";
 import { ChatThread } from "./ChatThread";
 import { ContactPanel } from "./ContactPanel";
 import { ConversationList } from "./ConversationList";
 import { fullDate } from "./format";
 import { LivePanel } from "./LivePanel";
+import { pollVisible } from "./polling";
 
 const STATES: Record<string, string> = {
   connected: "Conectado",
@@ -31,7 +33,18 @@ const STATES: Record<string, string> = {
   relink_required: "Requiere nueva vinculación",
   wrong_number: "No se pudo identificar la cuenta o no coincide con la cuenta vinculada",
 };
-const NO_COUNTS: Counts = { all: 0, mine: 0, unread: 0, archived: 0 };
+const NO_COUNTS: Counts = { all: 0, mine: 0, unread: 0, waiting: 0, unassigned: 0, archived: 0 };
+
+/** Keeps the previous object when nothing changed, so rows that did not change are not redrawn. */
+const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+function keepUnchanged<T extends { id: number }>(old: T[], next: T[]): T[] {
+  const before = new Map(old.map((x) => [x.id, x]));
+  const merged = next.map((x) => {
+    const prior = before.get(x.id);
+    return prior && same(prior, x) ? prior : x;
+  });
+  return merged.length === old.length && merged.every((x, i) => x === old[i]) ? old : merged;
+}
 
 /** Omnichannel inbox: conversations, chat, contact file (CRM) and the TikTok LIVE side. */
 export function ChatsPage() {
@@ -45,6 +58,9 @@ export function ChatsPage() {
   const [status, setStatus] = useState<WaStatus>({ state: "connecting" });
   const [items, setItems] = useState<ConversationItem[]>([]);
   const [counts, setCounts] = useState<Counts>(NO_COUNTS);
+  const [listLoaded, setListLoaded] = useState(false);
+  const [waitingList, setWaitingList] = useState<ConversationItem[]>([]);
+  const [statusOpen, setStatusOpen] = useState(false);
   const [hasMore, setHasMore] = useState(false);
   const [scope, setScope] = useState<Scope>("all");
   const [search, setSearch] = useState("");
@@ -68,6 +84,10 @@ export function ChatsPage() {
   const selectedRef = useRef(selected);
   selectedRef.current = selected;
   const seenFor = useRef<number | null>(null);
+  const listKey = JSON.stringify([scope, search, offset]);
+  const listKeyRef = useRef(listKey);
+  listKeyRef.current = listKey;
+  const listRequest = useRef(0);
 
   const choose = useCallback((id: number) => {
     setSelected(id);
@@ -80,16 +100,26 @@ export function ChatsPage() {
     seenFor.current = null;
   }, []);
 
-  const refreshList = useCallback(async () => {
-    const [list, connection] = await Promise.all([
-      chatApi.conversations(scope, search, offset),
-      chatApi.status(),
-    ]);
-    setItems(list.items);
-    setCounts(list.counts);
-    setHasMore(list.has_more);
-    setStatus(connection);
-  }, [scope, search, offset]);
+  const refreshStatus = useCallback(async (signal?: AbortSignal) => {
+    const connection = await chatApi.status(signal);
+    if (signal?.aborted) return;
+    setStatus((old) => (same(old, connection) ? old : connection));
+  }, []);
+
+  const refreshList = useCallback(
+    async (signal?: AbortSignal) => {
+      if (listKeyRef.current !== listKey) return;
+      const requestId = ++listRequest.current;
+      const list = await chatApi.conversations(scope, search, offset, signal);
+      if (signal?.aborted || listKeyRef.current !== listKey || requestId !== listRequest.current)
+        return;
+      setItems((old) => keepUnchanged(old, list.items));
+      setCounts((old) => (same(old, list.counts) ? old : list.counts));
+      setHasMore(list.has_more);
+      setListLoaded(true);
+    },
+    [scope, search, offset, listKey],
+  );
 
   const openPhone = useCallback(
     async (phone: string) => {
@@ -119,54 +149,61 @@ export function ChatsPage() {
 
   useEffect(() => {
     if (!mayRead) return;
-    let stopped = false;
-    let timer: ReturnType<typeof setTimeout>;
-    const poll = async () => {
-      try {
-        await refreshList();
-      } catch (e) {
-        if (!stopped) {
-          setError(problem(e));
-          setStatus({ state: "unavailable" });
-        }
-      }
-      if (!stopped) timer = setTimeout(poll, 4000);
-    };
-    timer = setTimeout(poll, 100);
-    return () => {
-      stopped = true;
-      clearTimeout(timer);
-    };
+    return pollVisible(refreshList, 4000, (e) => setError(problem(e)), 100);
   }, [mayRead, refreshList]);
+
+  // The status probe never holds up the inbox, and resumes immediately on reconnect.
+  useEffect(() => {
+    if (!mayRead) return;
+    return pollVisible(refreshStatus, 8000, () =>
+      setStatus((old) => (old.state === "unavailable" ? old : { state: "unavailable" })),
+    );
+  }, [mayRead, refreshStatus]);
+
+  // With no conversation open the middle shows who is waiting for an answer.
+  useEffect(() => {
+    if (!mayRead || selected) return;
+    return pollVisible(
+      async (signal) => {
+        const waiting = await chatApi.conversations("waiting", "", 0, signal);
+        if (signal.aborted) return;
+        setWaitingList((old) =>
+          keepUnchanged(
+            old,
+            [...waiting.items]
+              .sort((a, b) => (a.last?.at ?? "").localeCompare(b.last?.at ?? ""))
+              .slice(0, 8),
+          ),
+        );
+      },
+      10000,
+      () => undefined,
+    );
+  }, [mayRead, selected]);
 
   useEffect(() => {
     if (!mayRead || !selected) return;
-    let stopped = false;
-    let timer: ReturnType<typeof setTimeout>;
-    const poll = async () => {
-      try {
+    return pollVisible(
+      async (signal) => {
         const [crm, messages] = await Promise.all([
-          chatApi.detail(selected),
-          chatApi.thread(selected, before),
+          chatApi.detail(selected, signal),
+          chatApi.thread(selected, before, signal),
         ]);
-        if (!stopped) {
-          setDetail(crm);
-          setThread(messages);
-        }
-      } catch (e) {
-        if (!stopped) {
-          setDetail(null);
-          setThread(null);
-          setError(problem(e));
-        }
-      }
-      if (!stopped) timer = setTimeout(poll, 3000);
-    };
-    void poll();
-    return () => {
-      stopped = true;
-      clearTimeout(timer);
-    };
+        if (signal.aborted || selectedRef.current !== selected) return;
+        setDetail((old) => (old && same(old, crm) ? old : crm));
+        setThread((old) => {
+          if (!old) return messages;
+          const kept = keepUnchanged(old.messages, messages.messages);
+          return kept === old.messages &&
+            old.has_more === messages.has_more &&
+            same(old.lives, messages.lives)
+            ? old
+            : { ...messages, messages: kept };
+        });
+      },
+      3000,
+      (e) => setError(problem(e)),
+    );
   }, [mayRead, selected, before]);
 
   // Opening one of your own unread conversations marks it reviewed here (no WhatsApp read receipt).
@@ -307,16 +344,49 @@ export function ChatsPage() {
     />
   );
 
+  const notices: string[] = [];
+  if (status.state === "disconnected" && status.retry_at)
+    notices.push("Se perdió la conexión. Estamos intentando recuperarla sin borrar la sesión.");
+  if (status.state === "connected" && status.sync_ok === false)
+    notices.push(
+      `WhatsApp está vinculado, pero la sincronización no está al día. Última sincronización: ${fullDate(status.sync_at || null)}. Contacta al administrador.`,
+    );
+  if (status.unresolved)
+    notices.push(
+      "Hay mensajes pendientes de identificar por teléfono. El conector reintentará al recibir la correspondencia de WhatsApp.",
+    );
+  if (status.rejected)
+    notices.push(
+      `Hay ${status.rejected} mensajes o confirmaciones guardados pendientes de revisión por un error de datos. Contacta al administrador.`,
+    );
+  if (status.pending_events && status.sync_ok === false)
+    notices.push(`Hay ${status.pending_events} eventos guardados esperando sincronización.`);
+  if (status.detail) notices.push(status.detail);
+  const healthy = status.state === "connected" && notices.length === 0;
+  const current = items.find((c) => c.id === selected) ?? null;
+
   return (
     <div className="flex h-dvh flex-col bg-canvas text-ink">
       <AppNav />
       <div className="space-y-2 px-4 pt-3 sm:px-6">
-        <div className="flex flex-wrap items-center gap-3 text-sm">
-          <span
-            className={`rounded-full px-3 py-1 text-xs font-bold ${status.state === "connected" ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-800"}`}
+        <div className="relative flex flex-wrap items-center gap-3 text-sm">
+          <button
+            type="button"
+            aria-expanded={statusOpen}
+            onClick={() => setStatusOpen((v) => !v)}
+            className={`flex items-center gap-2 rounded-full px-3 py-1 text-xs font-bold ${healthy ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-800"}`}
           >
+            <span
+              className={`size-2 rounded-full ${healthy ? "bg-emerald-500" : "bg-amber-500"}`}
+            />
             WhatsApp · {STATES[status.state] || status.state} {status.phone}
-          </span>
+            {notices.length > 0 && (
+              <span className="flex items-center gap-1 rounded-full bg-amber-200/70 px-1.5">
+                <AlertTriangle size={11} /> {notices.length}
+              </span>
+            )}
+            <ChevronDown size={13} className={statusOpen ? "rotate-180" : ""} />
+          </button>
           {mayManage && status.state !== "connected" && (
             <button
               type="button"
@@ -338,6 +408,25 @@ export function ChatsPage() {
           >
             TikTok LIVE
           </button>
+          {statusOpen && (
+            <div
+              role="status"
+              className="absolute left-0 top-full z-30 mt-2 w-[min(26rem,92vw)] space-y-2 rounded-2xl border border-line bg-white p-4 text-sm shadow-xl"
+            >
+              <p className="font-bold">Estado de la conexión</p>
+              <p className="text-xs text-muted">
+                {STATES[status.state] || status.state}
+                {status.phone ? ` · ${status.phone}` : ""}
+                {status.sync_at ? ` · última sincronización ${fullDate(status.sync_at)}` : ""}
+              </p>
+              {notices.map((text) => (
+                <p key={text} className="rounded-xl bg-amber-50 p-3 text-xs text-amber-800">
+                  {text}
+                </p>
+              ))}
+              {!notices.length && <p className="text-xs text-emerald-700">Todo en orden.</p>}
+            </div>
+          )}
         </div>
         {error && (
           <p
@@ -348,25 +437,6 @@ export function ChatsPage() {
             <button type="button" onClick={() => setError("")} aria-label="Cerrar aviso">
               <X size={14} />
             </button>
-          </p>
-        )}
-        {status.detail && <p className="text-xs text-muted">{status.detail}</p>}
-        {status.state === "connected" && status.sync_ok === false && (
-          <p role="alert" className="rounded-xl bg-amber-50 p-3 text-sm text-amber-800">
-            WhatsApp está vinculado, pero la sincronización no está al día. Última sincronización:{" "}
-            {fullDate(status.sync_at || null)}. Contacta al administrador.
-          </p>
-        )}
-        {!!status.unresolved && (
-          <p className="text-xs text-amber-800">
-            Hay mensajes pendientes de identificar por teléfono. El conector reintentará al recibir
-            la correspondencia de WhatsApp.
-          </p>
-        )}
-        {!!status.rejected && (
-          <p role="alert" className="rounded-xl bg-amber-50 p-3 text-sm text-amber-800">
-            Hay {status.rejected} mensajes o confirmaciones guardados pendientes de revisión por un
-            error de datos. Contacta al administrador.
           </p>
         )}
         {mayManage && status.qr && (
@@ -389,12 +459,13 @@ export function ChatsPage() {
         )}
       </div>
 
-      <main className="mx-3 my-4 grid min-h-0 flex-1 grid-cols-1 overflow-hidden rounded-[24px] border border-line bg-white shadow-sm sm:mx-6 md:grid-cols-[230px_minmax(0,1fr)] min-[68.75rem]:grid-cols-[230px_minmax(300px,1fr)_205px_230px] 2xl:grid-cols-[270px_minmax(0,1fr)_240px_260px]">
+      <main className="mx-3 my-4 grid min-h-0 flex-1 grid-cols-1 overflow-hidden rounded-[24px] border border-line bg-white shadow-sm sm:mx-6 md:grid-cols-[320px_minmax(0,1fr)] min-[68.75rem]:grid-cols-[320px_minmax(320px,1fr)_220px_230px] 2xl:grid-cols-[360px_minmax(0,1fr)_260px_270px]">
         <div
           className={`min-h-0 overflow-hidden md:flex ${selected ? "hidden" : "flex"} [&>aside]:w-full`}
         >
           <ConversationList
             items={items}
+            loaded={listLoaded}
             counts={counts}
             scope={scope}
             onScope={(s) => {
@@ -418,42 +489,57 @@ export function ChatsPage() {
         <div
           className={`min-h-0 overflow-hidden md:flex ${selected ? "flex" : "hidden"} [&>section]:w-full`}
         >
-          <ChatThread
-            key={selected}
-            detail={detail}
-            thread={thread}
-            status={status}
-            canSend={maySend}
-            quickReplies={replies}
-            busy={busy}
-            before={before}
-            onOlder={setBefore}
-            onNewest={() => setBefore(null)}
-            onBack={() => {
-              setSelected(null);
-              setDetail(null);
-              setThread(null);
-            }}
-            onFicha={() => setFicha(true)}
-            scheduleSignal={scheduleSignal}
-            onClaim={() =>
-              id &&
-              void act(async () => {
-                await chatApi.claim(id);
-                return chatApi.detail(id);
-              })
-            }
-            onStage={(stage) => id && void act(() => chatApi.patch(id, { stage }))}
-            onResult={(result) => id && void act(() => chatApi.patch(id, { result }))}
-            onArchive={() =>
-              id && detail && void act(() => chatApi.patch(id, { archived: !detail.archived }))
-            }
-            onUnread={() => id && void act(() => chatApi.markUnread(id))}
-            onSend={send}
-            onSchedule={(text, at) =>
-              id ? act(() => chatApi.schedule(id, text, at)) : Promise.resolve(false)
-            }
-          />
+          {!selected && (
+            <ChatsHome
+              counts={counts}
+              waiting={waitingList}
+              loaded={listLoaded}
+              onScope={(next) => {
+                setScope(next);
+                setOffset(0);
+              }}
+              onSelect={choose}
+            />
+          )}
+          {selected && (
+            <ChatThread
+              key={selected}
+              item={current}
+              detail={detail}
+              thread={thread}
+              status={status}
+              canSend={maySend}
+              quickReplies={replies}
+              busy={busy}
+              before={before}
+              onOlder={setBefore}
+              onNewest={() => setBefore(null)}
+              onBack={() => {
+                setSelected(null);
+                setDetail(null);
+                setThread(null);
+              }}
+              onFicha={() => setFicha(true)}
+              scheduleSignal={scheduleSignal}
+              onClaim={() =>
+                id &&
+                void act(async () => {
+                  await chatApi.claim(id);
+                  return chatApi.detail(id);
+                })
+              }
+              onStage={(stage) => id && void act(() => chatApi.patch(id, { stage }))}
+              onResult={(result) => id && void act(() => chatApi.patch(id, { result }))}
+              onArchive={() =>
+                id && detail && void act(() => chatApi.patch(id, { archived: !detail.archived }))
+              }
+              onUnread={() => id && void act(() => chatApi.markUnread(id))}
+              onSend={send}
+              onSchedule={(text, at) =>
+                id ? act(() => chatApi.schedule(id, text, at)) : Promise.resolve(false)
+              }
+            />
+          )}
         </div>
         <div className="hidden min-h-0 overflow-hidden min-[68.75rem]:flex [&>aside]:w-full">
           {panel}

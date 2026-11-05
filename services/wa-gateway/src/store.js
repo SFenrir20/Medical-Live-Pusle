@@ -47,6 +47,7 @@ export class Store {
     return this.db.prepare('SELECT value FROM pending LIMIT 200').all().map(row => this.decrypt(row.value));
   }
   pendingCount() { return this.db.prepare('SELECT count(*) AS n FROM pending').get().n; }
+  eventCount() { return this.db.prepare('SELECT count(*) AS n FROM events').get().n; }
   resetAuth() { this.db.exec('DELETE FROM auth'); }
   registered() { return !!this.get('creds', 'auth')?.registered; }
   close() {

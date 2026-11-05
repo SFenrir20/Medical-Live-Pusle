@@ -85,6 +85,12 @@ class ChatMessage(Base):
     external_id = Column(String(128))                         # provider message id (idempotency)
     wa_request_id = Column(String(36), unique=True)
     media_id = Column(String(64))
+    # What the attachment is (image, voice, audio, video, document, sticker), for the screen:
+    # 'none' marks an old placeholder whose file could not be recovered.
+    media_kind = Column(String(10))
+    media_seconds = Column(Integer)
+    media_name = Column(String(200))
+    media_size = Column(Integer)
     sent_at = Column(DateTime(timezone=True))
     delivered_at = Column(DateTime(timezone=True))
     read_at = Column(DateTime(timezone=True))

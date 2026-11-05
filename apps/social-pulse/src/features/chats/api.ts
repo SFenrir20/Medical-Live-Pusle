@@ -20,14 +20,32 @@ export type ConversationItem = {
   archived: boolean;
   unread: number;
   last_message_at: string | null;
-  last: { body: string; direction: "in" | "out"; status: string; at: string | null } | null;
+  last: {
+    body: string;
+    direction: "in" | "out";
+    status: string;
+    at: string | null;
+    kind?: MediaKind | null;
+    seconds?: number | null;
+    name?: string | null;
+  } | null;
+  /** The last message is from the person and nobody has answered yet. */
+  waiting?: boolean;
   consent: Consent;
   opted_out: boolean;
   origin: "tiktok_live" | "whatsapp";
   lives: number;
 };
 
-export type Counts = { all: number; mine: number; unread: number; archived: number };
+export type MediaKind = "image" | "voice" | "audio" | "video" | "document" | "sticker";
+export type Counts = {
+  all: number;
+  mine: number;
+  unread: number;
+  waiting: number;
+  unassigned: number;
+  archived: number;
+};
 export type Scope = keyof Counts;
 
 export type Note = { id: number; body: string; author_id: string; author_name: string; at: string };
@@ -49,6 +67,14 @@ export type CrmDetail = ConversationItem & {
 
 export type Message = {
   has_image?: boolean;
+  media?: {
+    kind: MediaKind;
+    seconds: number | null;
+    name: string | null;
+    size: number | null;
+  } | null;
+  /** An old attachment that could not be recovered from WhatsApp. */
+  media_unavailable?: boolean;
   id: number;
   direction: "in" | "out";
   author_kind: string;
@@ -91,6 +117,11 @@ export type WaStatus = {
   rejected?: number;
   sync_ok?: boolean;
   sync_at?: string;
+  connected_at?: string | null;
+  retry_at?: string | null;
+  reconnect_attempt?: number;
+  pending_events?: number;
+  recovery_reason?: string | null;
 };
 
 export type QuickReply = {
@@ -123,27 +154,28 @@ export type LiveLead = {
   isMine: boolean;
 };
 
-const get = async <T>(url: string, params?: object) =>
-  (await apiClient.get<T>(url, { params })).data;
+const get = async <T>(url: string, params?: object, signal?: AbortSignal) =>
+  (await apiClient.get<T>(url, { params, signal })).data;
 const call = async <T>(method: "post" | "put" | "patch" | "delete", url: string, data?: object) =>
   (await apiClient.request<T>({ method, url, data })).data;
 
 export const chatApi = {
-  status: () => get<WaStatus>("/whatsapp/status"),
+  status: (signal?: AbortSignal) => get<WaStatus>("/whatsapp/status", undefined, signal),
   connect: () => call<WaStatus>("post", "/whatsapp/connect"),
   openPhone: (phone: string) => call<{ id: number }>("post", "/whatsapp/conversations", { phone }),
   claim: (id: number) => call("post", `/whatsapp/conversations/${id}/claim`),
   seen: (id: number) => call("post", `/whatsapp/conversations/${id}/seen`),
-  thread: (id: number, before: number | null) =>
-    get<Thread>(`/whatsapp/conversations/${id}`, before ? { before } : undefined),
+  thread: (id: number, before: number | null, signal?: AbortSignal) =>
+    get<Thread>(`/whatsapp/conversations/${id}`, before ? { before } : undefined, signal),
   send: (id: number, request_id: string, text: string) =>
     call<Message>("post", `/whatsapp/conversations/${id}/messages`, { request_id, text }),
 
-  image: async (id: number) =>
+  /** The file of a message (image, voice note, audio, video, document, sticker). */
+  media: async (id: number) =>
     (
-      await apiClient.get<Blob>(`/whatsapp/messages/${id}/image`, {
+      await apiClient.get<Blob>(`/whatsapp/messages/${id}/media`, {
         responseType: "blob",
-        timeout: 25000,
+        timeout: 60000,
       })
     ).data,
   sendImage: async (id: number, request_id: string, text: string, file: File) => {
@@ -159,13 +191,18 @@ export const chatApi = {
     ).data;
   },
 
-  conversations: (scope: Scope, q: string, offset: number) =>
-    get<{ items: ConversationItem[]; has_more: boolean; counts: Counts }>("/crm/conversations", {
-      scope,
-      q,
-      offset,
-    }),
-  detail: (id: number) => get<CrmDetail>(`/crm/conversations/${id}`),
+  conversations: (scope: Scope, q: string, offset: number, signal?: AbortSignal) =>
+    get<{ items: ConversationItem[]; has_more: boolean; counts: Counts }>(
+      "/crm/conversations",
+      {
+        scope,
+        q,
+        offset,
+      },
+      signal,
+    ),
+  detail: (id: number, signal?: AbortSignal) =>
+    get<CrmDetail>(`/crm/conversations/${id}`, undefined, signal),
   patch: (
     id: number,
     body: { stage?: Stage; result?: string; tags?: string[]; archived?: boolean },

@@ -1,10 +1,22 @@
 import base64
 import io
+import re
 import warnings
 from typing import Annotated
+from urllib.parse import quote
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+    UploadFile,
+)
 from PIL import Image, UnidentifiedImageError
 from pydantic import BaseModel, Field
 from sqlalchemy import case, func, or_, select, update
@@ -38,10 +50,20 @@ def item(conversation, registry=None):
             'unread': conversation.unread, 'last_message_at': aware(conversation.last_message_at)}
 
 
+def media_of(message):
+    """The attachment of a message as the screen needs it, or None."""
+    if not message.media_id:
+        return None
+    return {'kind': message.media_kind or 'image', 'seconds': message.media_seconds,
+            'name': message.media_name, 'size': message.media_size}
+
+
 def message_item(message):
     return {'id': message.id, 'direction': message.direction, 'author_kind': message.author_kind,
             'author_id': message.author_id, 'body': message.body, 'status': message.status,
-            'error': message.error, 'at': aware(message.created_at), 'has_image': bool(message.media_id),
+            'error': message.error, 'at': aware(message.created_at),
+            'has_image': bool(message.media_id) and (message.media_kind or 'image') == 'image',
+            'media': media_of(message), 'media_unavailable': message.media_kind == service.NO_MEDIA,
             'sent_at': aware(message.sent_at), 'delivered_at': aware(message.delivered_at),
             'read_at': aware(message.read_at), 'observed_at': aware(message.observed_at)}
 
@@ -216,6 +238,74 @@ async def image(message_id: int, who=Depends(reader), session=Depends(get_sessio
     return Response(content, media_type=data['mime'], headers={
         'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff',
         'Content-Disposition': 'inline'})
+
+
+AUDIO = {'audio/ogg', 'audio/mpeg', 'audio/mp4', 'audio/webm', 'audio/wav', 'audio/amr'}
+DOCUMENT = re.compile(r'^(application/(pdf|octet-stream|msword|rtf|zip|vnd\.ms-(excel|powerpoint)|'
+                      r'vnd\.openxmlformats-officedocument\.[a-z.]+)|text/(plain|csv))$')
+MB = 1024 * 1024
+# kind -> (connector path, allowed types, size limit, shown in the page or downloaded)
+MEDIA_RULES = {
+    'image': ('/images/', {'image/jpeg', 'image/png', 'image/webp'}, 8 * MB, True),
+    'sticker': ('/media/', {'image/webp'}, 1 * MB, True),
+    'voice': ('/media/', AUDIO, 16 * MB, True),
+    'audio': ('/media/', AUDIO, 16 * MB, True),
+    'video': ('/media/', {'video/mp4', 'video/webm', 'video/3gpp'}, 24 * MB, True),
+    'document': ('/media/', DOCUMENT, 24 * MB, False),
+}
+
+
+def byte_range(header, size):
+    """A single `bytes=a-b` range (what audio and video players ask for), or None."""
+    found = re.fullmatch(r'bytes=(\d*)-(\d*)', (header or '').strip())
+    if not found or not (found.group(1) or found.group(2)):
+        return None
+    if found.group(1):
+        start, end = int(found.group(1)), int(found.group(2)) if found.group(2) else size - 1
+    else:
+        start, end = max(0, size - int(found.group(2))), size - 1
+    end = min(end, size - 1)
+    if start > end or start >= size:
+        raise HTTPException(416, 'Rango no válido.', headers={'Content-Range': f'bytes */{size}'})
+    return start, end
+
+
+@router.get('/messages/{message_id}/media')
+async def media(message_id: int, request: Request, who=Depends(reader), session=Depends(get_session)):
+    """The file of a message (image, voice note, audio, video, document, sticker), with the same
+    access rule as the conversation. The type is checked here again, documents are only ever
+    downloaded, and nothing is rendered from a type the browser could execute."""
+    message = await session.get(ChatMessage, message_id)
+    kind = (message.media_kind or 'image') if message is not None and message.media_id else None
+    if kind not in MEDIA_RULES:
+        raise HTTPException(404, 'Archivo no encontrado.')
+    conversation, _ = await access(session, message.conversation_id, who)
+    path, allowed, limit, inline = MEDIA_RULES[kind]
+    try:
+        data = await gateway.call(path + message.media_id)
+    except gateway.GatewayUnavailable as exc:
+        raise HTTPException(503, 'No se pudo recuperar el archivo. Reintenta; puede haber vencido en WhatsApp.') from exc
+    mime = data.get('mime')
+    if data.get('phone') != conversation.phone:
+        raise HTTPException(502, 'El archivo no corresponde a esta conversación.')
+    if not isinstance(mime, str) or (mime not in allowed if isinstance(allowed, set) else not allowed.match(mime)):
+        raise HTTPException(502, 'Formato de archivo no compatible.')
+    try:
+        content = base64.b64decode(data['data'], validate=True)
+    except (KeyError, ValueError, TypeError):
+        raise HTTPException(502, 'Archivo dañado.') from None
+    if len(content) > limit:
+        raise HTTPException(413, f'El archivo supera los {limit // MB} MB.')
+    name = re.sub(r'[\x00-\x1f/\\\\"]', '_', message.media_name or 'documento')[:120]
+    headers = {'Cache-Control': 'private, max-age=86400', 'X-Content-Type-Options': 'nosniff',
+               'Cross-Origin-Resource-Policy': 'same-origin', 'Accept-Ranges': 'bytes',
+               'Content-Disposition': 'inline' if inline else f"attachment; filename*=UTF-8''{quote(name)}"}
+    window = byte_range(request.headers.get('range'), len(content)) if inline else None
+    if window:
+        start, end = window
+        headers['Content-Range'] = f'bytes {start}-{end}/{len(content)}'
+        return Response(content[start:end + 1], 206, media_type=mime, headers=headers)
+    return Response(content, media_type=mime, headers=headers)
 
 
 @router.post('/conversations/{conversation_id}/images', status_code=202)

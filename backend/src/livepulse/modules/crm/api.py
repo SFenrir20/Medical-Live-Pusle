@@ -91,8 +91,12 @@ async def writable(session, conversation_id: int, who):
 def message_preview(message) -> dict | None:
     if message is None:
         return None
+    kind = message.media_kind if message.media_kind != 'none' else None
+    if message.media_id and kind is None:
+        kind = 'image'
     return {'body': message.body[:140], 'direction': message.direction, 'status': message.status,
-            'at': iso(message.created_at)}
+            'at': iso(message.created_at), 'kind': kind, 'seconds': message.media_seconds,
+            'name': message.media_name}
 
 
 async def build_items(session, rows, who) -> list[dict]:
@@ -131,13 +135,20 @@ async def build_items(session, rows, who) -> list[dict]:
             'archived': conversation.archived, 'unread': conversation.unread,
             'last_message_at': iso(conversation.last_message_at),
             'last': message_preview(last.get(conversation.id)),
+            'waiting': bool(last.get(conversation.id) and last[conversation.id].direction == 'in'),
             'consent': status, 'opted_out': conversation.phone in opted,
             'origin': 'tiktok_live' if registry else 'whatsapp',
             'lives': lives.get(conversation.phone, 0)})
     return items
 
 
-SCOPES = ('all', 'mine', 'unread', 'archived')
+SCOPES = ('all', 'mine', 'unread', 'waiting', 'unassigned', 'archived')
+
+
+def last_direction():
+    """Direction of the newest message: 'in' means the person is waiting for an answer."""
+    return (select(ChatMessage.direction).where(ChatMessage.conversation_id == ChatConversation.id)
+            .order_by(ChatMessage.id.desc()).limit(1).correlate(ChatConversation).scalar_subquery())
 
 
 def in_scope(query, scope: str, me: str):
@@ -148,6 +159,10 @@ def in_scope(query, scope: str, me: str):
         query = query.where(owner_expr() == me)
     elif scope == 'unread':
         query = query.where(ChatConversation.unread > 0)
+    elif scope == 'waiting':
+        query = query.where(last_direction() == 'in')
+    elif scope == 'unassigned':
+        query = query.where(owner_expr().is_(None))
     return query
 
 
@@ -166,7 +181,7 @@ def matching(query, text: str):
 
 
 @router.get('/conversations')
-async def conversations(scope: Literal['all', 'mine', 'unread', 'archived'] = 'all',
+async def conversations(scope: Literal['all', 'mine', 'unread', 'waiting', 'unassigned', 'archived'] = 'all',
                         q: str = Query('', max_length=100), offset: int = Query(0, ge=0),
                         who=Depends(reader), session=Depends(get_session)):
     me = who['user_id']

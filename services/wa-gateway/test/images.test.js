@@ -51,17 +51,17 @@ test('download is persisted for subsequent views, and failed downloads remain re
   assert.equal(downloads, 1);
 });
 
-test('oversize/unsupported attachments are rejected; view-once and stickers have no image attachment', async t => {
+test('oversize/unsupported attachments are rejected; view-once media is never kept', async t => {
   const { store, mirror } = setup(t);
   assert.throws(() => uploadImage(store, phone, Buffer.from('<svg/>').toString('base64')), /unsupported_image/);
   const id = registerImage(store, phone, { key: { id: 'large' }, message: { imageMessage: {} } });
   await assert.rejects(loadImage(store, null, id, async () => Readable.from([Buffer.alloc(MAX_IMAGE + 1)])), /image_too_large/);
   for (const message of [{ viewOnceMessage: { message: { imageMessage: { caption: 'privada' } } } },
     { ephemeralMessage: { message: { viewOnceMessageV2: { message: { imageMessage: {} } } } } },
-    { stickerMessage: { mimetype: 'image/webp' } }]) {
+    { viewOnceMessage: { message: { videoMessage: { caption: 'privado' } } } }]) {
     await mirror.message({ key: { id: randomUUID(), remoteJid: phone.slice(1) + '@s.whatsapp.net' },
       messageTimestamp: 1800000000, message });
   }
   assert.equal(store.events().length, 3);
-  assert.ok(store.events().every(e => e.media_id === null));
+  assert.ok(store.events().every(e => e.media_id === null && e.media_kind === null));
 });

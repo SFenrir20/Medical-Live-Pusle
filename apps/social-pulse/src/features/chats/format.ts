@@ -118,3 +118,80 @@ export function duration(seconds: number): string {
   const rest = s % 60;
   return [h, m, rest].map((n) => String(n).padStart(2, "0")).join(":");
 }
+
+/** 0:23 — length of an audio or video. */
+export function clip(seconds: number | null | undefined): string {
+  if (seconds == null || !Number.isFinite(seconds)) return "";
+  const s = Math.max(0, Math.round(seconds));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}
+
+export function bytes(size: number | null | undefined): string {
+  if (!size) return "";
+  if (size < 1024) return `${size} B`;
+  if (size < 1024 * 1024) return `${Math.round(size / 1024)} KB`;
+  return `${(size / 1024 / 1024).toFixed(1)} MB`;
+}
+
+/** "hace 5 min" — how long ago, for the people waiting for an answer. */
+export function ago(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const minutes = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 60000));
+  if (minutes < 1) return "ahora";
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} h`;
+  return `${Math.floor(hours / 24)} d`;
+}
+
+export const WAIT_LONG_MINUTES = 60;
+export const waitedMinutes = (iso: string | null | undefined) =>
+  iso ? Math.floor((Date.now() - new Date(iso).getTime()) / 60000) : 0;
+
+const PLACEHOLDER =
+  /^\[(Imagen|Video|Audio|Documento|Sticker): consultar en el teléfono\]\n?([\s\S]*)$/;
+/** Messages saved before attachments were supported read "[Audio: consultar en el teléfono]". */
+export function placeholderOf(body: string): { label: string; caption: string } | null {
+  const found = PLACEHOLDER.exec(body);
+  return found ? { label: found[1], caption: found[2] } : null;
+}
+
+export const KIND_LABEL = {
+  image: "Foto",
+  voice: "Mensaje de voz",
+  audio: "Audio",
+  video: "Video",
+  document: "Documento",
+  sticker: "Sticker",
+} as const;
+
+/** What the conversation list shows for the last message: the kind of attachment and its text. */
+export function previewOf(last: {
+  body: string;
+  kind?: keyof typeof KIND_LABEL | null;
+  seconds?: number | null;
+  name?: string | null;
+}): { kind: keyof typeof KIND_LABEL | null; text: string } {
+  const holder = placeholderOf(last.body);
+  const kindOfHolder = holder
+    ? (
+        {
+          Imagen: "image",
+          Video: "video",
+          Audio: "voice",
+          Documento: "document",
+          Sticker: "sticker",
+        } as const
+      )[holder.label as "Imagen" | "Video" | "Audio" | "Documento" | "Sticker"]
+    : null;
+  const kind = last.kind ?? kindOfHolder;
+  const caption = (holder ? holder.caption : last.body === "[Imagen]" ? "" : last.body).trim();
+  if (!kind) return { kind: null, text: caption };
+  const base =
+    kind === "voice" || kind === "audio"
+      ? [KIND_LABEL[kind], clip(last.seconds)].filter(Boolean).join(" ")
+      : kind === "document"
+        ? last.name || KIND_LABEL.document
+        : KIND_LABEL[kind];
+  return { kind, text: kind === "sticker" || !caption ? base : `${base} · ${caption}` };
+}
