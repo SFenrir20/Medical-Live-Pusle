@@ -203,6 +203,31 @@ async def test_reassignment_cancels_unsent_queued_message(env, people, monkeypat
         assert (await session.scalar(select(ChatMessage))).status == 'blocked'
 
 
+async def test_slow_outbox_yields_to_inbound_sync_instead_of_blocking_a_whole_batch(env, people, monkeypatch):
+    client, factory = env
+    conversation = await open_chat(client)
+    await claim_chat(client, conversation)
+    await queue(client, conversation)
+    await queue(client, conversation)
+    clock = iter([0, 0, 46])
+    monkeypatch.setattr(service, 'time', type('Clock', (), {'monotonic': staticmethod(lambda: next(clock))}))
+    sent = []
+
+    async def fake_call(path, data=None):
+        if path == '/events':
+            return []
+        assert path == '/send'
+        sent.append(data['request_id'])
+        return {'state': 'sent', 'external_id': 'slow-send', 'at': T0.isoformat()}
+
+    monkeypatch.setattr(gateway, 'call', fake_call)
+    await service.tick(factory)
+    assert len(sent) == 1
+    async with factory() as session:
+        statuses = list((await session.scalars(select(ChatMessage.status))).all())
+        assert sorted(statuses) == ['queued', 'sent']
+
+
 async def test_qr_is_restricted_and_not_cached(env, people, monkeypatch):
     client, _ = env
 

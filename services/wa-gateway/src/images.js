@@ -6,7 +6,8 @@ export const MAX_IMAGE = 8 * 1024 * 1024;
 export function isViewOnce(content, depth = 0) {
   if (!content || depth > 8) return false;
   if (content.viewOnceMessage || content.viewOnceMessageV2 || content.viewOnceMessageV2Extension ||
-      content.imageMessage?.viewOnce) return true;
+      content.imageMessage?.viewOnce || content.videoMessage?.viewOnce ||
+      content.audioMessage?.viewOnce) return true;
   return isViewOnce(content.ephemeralMessage?.message, depth + 1) ||
     isViewOnce(content.documentWithCaptionMessage?.message, depth + 1);
 }

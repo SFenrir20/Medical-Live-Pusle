@@ -1,5 +1,15 @@
-import { ChatImage, ImagePreview } from "./ChatImage";
-import { FormEvent, Fragment, KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
+import { ImagePreview } from "./ChatImage";
+import { MessageMedia } from "./ChatMedia";
+import {
+  FormEvent,
+  Fragment,
+  KeyboardEvent,
+  memo,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   AlertTriangle,
   Archive,
@@ -8,6 +18,7 @@ import {
   Check,
   CheckCheck,
   Clock,
+  FileQuestion,
   MailOpen,
   MoreVertical,
   ImagePlus,
@@ -18,9 +29,28 @@ import {
   Zap,
   X,
 } from "lucide-react";
-import type { CrmDetail, Message, QuickReply, Stage, Thread, WaStatus } from "./api";
+import type {
+  ConversationItem,
+  CrmDetail,
+  Message,
+  QuickReply,
+  Stage,
+  Thread,
+  WaStatus,
+} from "./api";
 import { Avatar } from "./ConversationList";
-import { clock, dayLabel, dayOf, fullDate, nice, RESULTS, STAGES, STATUS_LABEL } from "./format";
+import {
+  clock,
+  dayLabel,
+  dayOf,
+  fullDate,
+  nice,
+  placeholderOf,
+  RESULTS,
+  stageOf,
+  STAGES,
+  STATUS_LABEL,
+} from "./format";
 
 const EMOJIS = [
   "😊",
@@ -72,11 +102,103 @@ function timesTitle(m: Message): string {
   return lines.join("\n");
 }
 
+const PLACEHOLDER_AFTER_DAYS = 45;
+
+/** One bubble. Memoised: the thread refreshes every few seconds and only new messages redraw. */
+const MessageRow = memo(function MessageRow({
+  m,
+  tail,
+  day,
+  unreadDivider,
+}: {
+  m: Message;
+  tail: boolean;
+  day: string | null;
+  unreadDivider: boolean;
+}) {
+  const out = m.direction === "out";
+  const holder = !m.media ? placeholderOf(m.body) : null;
+  const caption = (
+    m.media ? (m.body === "[Imagen]" ? "" : m.body) : holder ? holder.caption : m.body
+  ).trim();
+  const old = Date.now() - new Date(m.at).getTime() > PLACEHOLDER_AFTER_DAYS * 86400000;
+  const gone = !!holder && (m.media_unavailable || old);
+  const bare = m.media?.kind === "sticker" && !caption;
+  const time = (
+    <span
+      title={timesTitle(m)}
+      className="float-right ml-3 mt-1.5 flex items-center gap-1 text-[11px] leading-none text-[#667781]"
+    >
+      {clock(m.at)} <Ticks message={m} />
+    </span>
+  );
+  return (
+    <Fragment>
+      {day && (
+        <span className="my-2 self-center rounded-lg bg-white/95 px-3 py-1 text-[11.5px] font-medium uppercase tracking-wide text-[#54656f] shadow-[0_1px_0.5px_rgba(11,20,26,.13)]">
+          {day}
+        </span>
+      )}
+      {unreadDivider && (
+        <span className="my-2 self-stretch bg-white/70 py-1 text-center text-xs font-medium text-[#54656f]">
+          Mensajes no leídos
+        </span>
+      )}
+      <article
+        className={`max-w-[85%] sm:max-w-[75%] ${tail ? "mt-2" : "mt-0.5"} ${out ? "self-end" : "self-start"} ${
+          bare
+            ? ""
+            : `rounded-lg px-2.5 pb-1.5 pt-1.5 shadow-[0_1px_0.5px_rgba(11,20,26,.13)] ${
+                out ? "bg-[#d9fdd3]" : "bg-white"
+              } ${tail ? (out ? "wa-tail-out rounded-tr-none" : "wa-tail-in rounded-tl-none") : ""}`
+        }`}
+      >
+        {out && tail && !bare && (
+          <p className="mb-0.5 text-xs font-semibold text-[#00805f]">
+            {m.author_kind === "agent" ? m.author_name || m.author_id : "Desde el teléfono"}
+          </p>
+        )}
+        {m.media && (
+          <div className={bare ? "" : "mb-1"}>
+            <MessageMedia message={m} />
+          </div>
+        )}
+        {holder && (
+          <p className="flex items-center gap-2 py-1 text-[13px] italic text-[#667781]">
+            <FileQuestion size={16} className="shrink-0" />
+            {gone
+              ? `${holder.label} no disponible en el CRM. Ábrelo en el teléfono.`
+              : `Recuperando ${holder.label.toLowerCase()} de WhatsApp…`}
+          </p>
+        )}
+        {caption ? (
+          <p className="whitespace-pre-wrap break-words text-[14.2px] leading-[19px] text-[#111b21]">
+            {caption}
+            {time}
+          </p>
+        ) : (
+          <div className={bare ? "mt-0.5 flex justify-end" : "flow-root"}>{time}</div>
+        )}
+        {m.status !== "sent" &&
+          m.status !== "delivered" &&
+          m.status !== "read" &&
+          m.status !== "received" && (
+            <p className="clear-both text-[11px] text-[#667781]">
+              {STATUS_LABEL[m.status] ?? m.status}
+            </p>
+          )}
+        {m.error && <p className="clear-both mt-1 text-xs text-amber-800">{m.error}</p>}
+      </article>
+    </Fragment>
+  );
+});
+
 function lima(value: string): string {
   return `${value}:00-05:00`; // a datetime-local value is read as Lima time
 }
 
 export function ChatThread({
+  item,
   detail,
   thread,
   status,
@@ -97,6 +219,8 @@ export function ChatThread({
   onSend,
   onSchedule,
 }: {
+  /** The row of the list: names the conversation while its file is still loading. */
+  item: ConversationItem | null;
   detail: CrmDetail | null;
   thread: Thread | null;
   status: WaStatus;
@@ -129,7 +253,12 @@ export function ChatThread({
   const list = useRef<HTMLDivElement>(null);
   const follow = useRef(true);
 
-  const conversationId = detail?.id;
+  const head: ConversationItem | null = detail ?? item;
+  const conversationId = head?.id;
+  const [unreadAtOpen, setUnreadAtOpen] = useState<number | null>(null);
+  useEffect(() => {
+    if (detail && unreadAtOpen === null) setUnreadAtOpen(detail.unread);
+  }, [detail, unreadAtOpen]);
   useEffect(() => {
     if (scheduleSignal > 0) setPopover("schedule");
   }, [scheduleSignal]);
@@ -158,9 +287,18 @@ export function ChatThread({
     return quickReplies.filter((r) => r.shortcut.startsWith(typed)).slice(0, 5);
   }, [draft, quickReplies]);
 
-  if (!detail)
+  // Where the "unread" line goes: before the oldest inbound message that was unread on opening.
+  const dividerAt = useMemo(() => {
+    if (!unreadAtOpen) return -1;
+    let seen = 0;
+    for (let i = messages.length - 1; i >= 0; i--)
+      if (messages[i].direction === "in" && ++seen === unreadAtOpen) return i;
+    return -1;
+  }, [messages, unreadAtOpen]);
+
+  if (!head)
     return (
-      <section className="grid min-h-0 place-items-center bg-[#faf9f6] p-8 text-center text-muted">
+      <section className="grid min-h-0 place-items-center bg-[#f0f2f5] p-8 text-center text-muted">
         <div>
           <MessageCircle className="mx-auto mb-3" />
           Selecciona una conversación o abre el número de un contacto.
@@ -168,13 +306,15 @@ export function ChatThread({
       </section>
     );
 
-  const own = detail.is_mine;
+  const own = head.is_mine;
+  const loaded = !!detail;
   const connected = status.state === "connected" && status.sync_ok !== false;
-  const canWrite = canSend && own && connected;
+  const canWrite = canSend && own && connected && loaded;
+  const stage = stageOf(head.stage);
   const fill = (text: string) =>
     text.replace(
       /\{\{\s*nombre\s*(?:\|([^}]*))?\}\}/g,
-      (_, fallback) => detail.name || (fallback ?? "").trim(),
+      (_, fallback) => head.name || (fallback ?? "").trim(),
     );
 
   const submit = async (event?: FormEvent) => {
@@ -222,53 +362,64 @@ export function ChatThread({
 
   return (
     <section className="flex min-h-0 min-w-0 flex-col bg-white">
-      <header className="flex flex-wrap items-center gap-3 border-b border-line px-4 py-3">
+      <header className="flex flex-wrap items-center gap-3 border-b border-line bg-[#f0f2f5] px-4 py-2.5">
         <button
           type="button"
           onClick={onBack}
-          className="rounded-lg p-1 text-muted hover:bg-slate-100 md:hidden"
+          className="rounded-lg p-1 text-muted hover:bg-slate-200 md:hidden"
           aria-label="Volver a la lista"
         >
           <ArrowLeft size={18} />
         </button>
-        <Avatar name={detail.name} phone={detail.phone} size="size-10" />
+        <Avatar name={head.name} phone={head.phone} size="size-10" />
         <div className="min-w-0 flex-1">
-          <h2 className="truncate font-bold">{detail.name || nice(detail.phone)}</h2>
-          <p className="truncate text-xs text-muted">
-            {nice(detail.phone)} ·{" "}
-            {detail.is_mine
-              ? "Es tuyo"
-              : detail.advisor_name
-                ? `Lo atiende ${detail.advisor_name}`
-                : "Sin asignar"}
+          <h2 className="truncate text-[15px] font-semibold text-[#111b21]">
+            {head.name || nice(head.phone)}
+          </h2>
+          <p className="flex items-center gap-1.5 truncate text-xs text-[#667781]">
+            <span className="truncate">
+              {nice(head.phone)} ·{" "}
+              {head.is_mine
+                ? "Es tuyo"
+                : head.advisor_name
+                  ? `Lo atiende ${head.advisor_name}`
+                  : "Sin asignar"}
+            </span>
+            <span
+              className={`hidden shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold sm:inline ${stage.chip}`}
+            >
+              {stage.label}
+            </span>
           </p>
         </div>
         <button
           type="button"
           onClick={onFicha}
-          className="rounded-xl border border-line px-3 py-2 text-xs font-bold text-muted hover:bg-slate-50 min-[68.75rem]:hidden"
+          className="rounded-xl border border-line bg-white px-3 py-2 text-xs font-bold text-muted hover:bg-slate-50 min-[68.75rem]:hidden"
         >
           Ficha
         </button>
-        {canSend && !detail.advisor_id && (
+        {canSend && !head.advisor_id && (
           <button
             type="button"
             onClick={onClaim}
-            disabled={busy}
+            disabled={busy || !loaded}
             className="rounded-xl bg-primary px-4 py-2 text-sm font-bold text-white disabled:opacity-50"
           >
             Tomar contacto
           </button>
         )}
-        <span className="ml-auto hidden rounded-full bg-emerald-50 px-2 py-1 text-[10px] font-semibold text-emerald-700 min-[87.5rem]:inline">
-          {detail.archived ? "Archivada" : "Conversación abierta"}
-        </span>
+        {head.archived && (
+          <span className="ml-auto rounded-full bg-slate-200 px-2 py-1 text-[10px] font-semibold text-slate-600">
+            Archivada
+          </span>
+        )}
         <button
           type="button"
           aria-label="Opciones de conversación"
           aria-expanded={actionsOpen}
           onClick={() => setActionsOpen(!actionsOpen)}
-          className="rounded-xl border border-line p-2 text-muted"
+          className={`rounded-xl border border-line bg-white p-2 text-muted ${head.archived ? "" : "ml-auto"}`}
         >
           <MoreVertical size={15} />
         </button>
@@ -278,8 +429,8 @@ export function ChatThread({
         <div className="flex flex-wrap items-center gap-2 border-b border-line px-4 py-2.5">
           <select
             aria-label="Etapa del contacto"
-            value={detail.stage}
-            disabled={!detail.can_edit || busy}
+            value={head.stage}
+            disabled={!detail?.can_edit || busy}
             onChange={(e) => onStage(e.target.value as Stage)}
             className="rounded-lg border border-line bg-white px-3 py-1.5 text-sm font-semibold disabled:opacity-60"
           >
@@ -291,8 +442,8 @@ export function ChatThread({
           </select>
           <select
             aria-label="Resultado"
-            value={detail.result ?? ""}
-            disabled={!detail.can_edit || busy}
+            value={head.result ?? ""}
+            disabled={!detail?.can_edit || busy}
             onChange={(e) => onResult(e.target.value)}
             className="rounded-lg border border-line bg-white px-3 py-1.5 text-sm text-muted disabled:opacity-60"
           >
@@ -308,7 +459,7 @@ export function ChatThread({
               type="button"
               title="Marcar como no leído"
               aria-label="Marcar como no leído"
-              disabled={!detail.can_edit || busy}
+              disabled={!detail?.can_edit || busy}
               onClick={onUnread}
               className="grid size-9 place-items-center rounded-lg border border-line hover:bg-slate-50 disabled:opacity-40"
             >
@@ -316,13 +467,13 @@ export function ChatThread({
             </button>
             <button
               type="button"
-              title={detail.archived ? "Desarchivar" : "Archivar"}
-              aria-label={detail.archived ? "Desarchivar" : "Archivar"}
-              disabled={!detail.can_edit || busy}
+              title={head.archived ? "Desarchivar" : "Archivar"}
+              aria-label={head.archived ? "Desarchivar" : "Archivar"}
+              disabled={!detail?.can_edit || busy}
               onClick={onArchive}
               className="grid size-9 place-items-center rounded-lg border border-line hover:bg-slate-50 disabled:opacity-40"
             >
-              {detail.archived ? <ArchiveRestore size={16} /> : <Archive size={16} />}
+              {head.archived ? <ArchiveRestore size={16} /> : <Archive size={16} />}
             </button>
             <button
               type="button"
@@ -355,7 +506,7 @@ export function ChatThread({
           const el = e.currentTarget;
           follow.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
         }}
-        className="flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto bg-[#faf9f6] px-4 py-4 sm:px-8 [background-image:radial-gradient(rgb(14_148_171/12%)_1px,transparent_1px)] [background-size:18px_18px]"
+        className="wa-wallpaper flex min-h-0 flex-1 flex-col overflow-y-auto px-4 py-3 sm:px-[7%]"
       >
         <div className="flex justify-between text-xs font-semibold text-primary">
           {thread?.has_more && thread.messages[0] && (
@@ -376,59 +527,34 @@ export function ChatThread({
               : "Sin mensajes registrados. La sincronización comienza al vincular; no importa todo el historial anterior."}
           </p>
         )}
+        {!thread && (
+          <p className="m-auto rounded-lg bg-white/90 px-4 py-2 text-sm text-[#54656f] shadow-sm">
+            Cargando mensajes…
+          </p>
+        )}
         {messages.map((m, i) => {
-          const out = m.direction === "out";
-          const newDay = i === 0 || dayOf(messages[i - 1].at) !== dayOf(m.at);
+          const prev = messages[i - 1];
+          const newDay = !prev || dayOf(prev.at) !== dayOf(m.at);
           return (
-            <Fragment key={m.id}>
-              {newDay && (
-                <span className="my-2 self-center rounded-lg bg-white px-3 py-1 text-[11px] font-semibold text-muted shadow-sm">
-                  {dayLabel(m.at)}
-                </span>
-              )}
-              <article
-                className={`max-w-[85%] rounded-2xl px-4 py-3 text-xs leading-5 shadow-sm sm:max-w-[85%] ${out ? "self-end rounded-tr-sm bg-[#dcf8e7]" : "self-start rounded-tl-sm bg-white"}`}
-              >
-                {out && (
-                  <p className="text-[11px] font-bold text-emerald-800">
-                    {m.author_kind === "agent"
-                      ? m.author_name || m.author_id
-                      : "Desde teléfono u otro dispositivo"}
-                  </p>
-                )}
-                {m.has_image && <ChatImage messageId={m.id} />}
-                {(m.body !== "[Imagen]" || !m.has_image) && (
-                  <p className="whitespace-pre-wrap break-words">{m.body}</p>
-                )}
-                <p
-                  title={timesTitle(m)}
-                  className="mt-0.5 flex items-center justify-end gap-1 text-[10.5px] text-[#667781]"
-                >
-                  {clock(m.at)} <Ticks message={m} />
-                </p>
-                {m.status !== "sent" &&
-                  m.status !== "delivered" &&
-                  m.status !== "read" &&
-                  m.status !== "received" && (
-                    <p className="text-[10.5px] text-[#667781]">
-                      {STATUS_LABEL[m.status] ?? m.status}
-                    </p>
-                  )}
-                {m.error && <p className="mt-1 text-xs text-amber-800">{m.error}</p>}
-              </article>
-            </Fragment>
+            <MessageRow
+              key={m.id}
+              m={m}
+              day={newDay ? dayLabel(m.at) : null}
+              tail={newDay || prev.direction !== m.direction}
+              unreadDivider={i === dividerAt}
+            />
           );
         })}
       </div>
 
-      <div className="relative border-t border-line bg-white p-3">
+      <div className="relative border-t border-line bg-[#f0f2f5] p-2.5">
         {!canSend && (
           <p className="px-2 pb-2 text-xs text-muted">Tu rol solo revisa las conversaciones.</p>
         )}
         {canSend && !own && (
           <p className="px-2 pb-2 text-xs text-muted">
-            {detail.advisor_id
-              ? `Lo atiende ${detail.advisor_name ?? "otra persona"}: un supervisor puede reasignarlo.`
+            {head.advisor_id
+              ? `Lo atiende ${head.advisor_name ?? "otra persona"}: un supervisor puede reasignarlo.`
               : "Toma el contacto para responder."}
           </p>
         )}
@@ -564,10 +690,7 @@ export function ChatThread({
             setPopover(null);
           }}
         />
-        <form
-          onSubmit={submit}
-          className="flex items-end gap-1 rounded-2xl border border-line bg-canvas p-1.5"
-        >
+        <form onSubmit={submit} className="flex items-end gap-1">
           <button
             type="button"
             title="Emojis"
@@ -583,7 +706,7 @@ export function ChatThread({
             aria-label="Adjuntar imagen"
             disabled={!canWrite || busy}
             onClick={() => fileInput.current?.click()}
-            className="grid size-10 shrink-0 place-items-center rounded-full text-[#54656f] disabled:opacity-40"
+            className="grid size-10 shrink-0 place-items-center rounded-full text-[#54656f] hover:bg-slate-200 disabled:opacity-40"
           >
             <ImagePlus size={20} />
           </button>
@@ -600,14 +723,14 @@ export function ChatThread({
                 ? "Escribe un mensaje (/ para respuestas rápidas)"
                 : "No puedes escribir en esta conversación"
             }
-            className="max-h-32 min-h-10 min-w-0 flex-1 resize-none rounded-2xl border-0 bg-white px-4 py-2.5 text-sm outline-none disabled:opacity-60"
+            className="max-h-32 min-h-10 min-w-0 flex-1 resize-none rounded-lg border-0 bg-white px-4 py-2.5 text-[15px] outline-none disabled:opacity-60"
           />
           <button
             type="button"
             title="Mensajes pregrabados"
             aria-label="Mensajes pregrabados"
             onClick={() => setPopover(popover === "replies" ? null : "replies")}
-            className="hidden size-10 shrink-0 place-items-center rounded-full text-muted 2xl:grid"
+            className="grid size-10 shrink-0 place-items-center rounded-full text-[#54656f] hover:bg-slate-200"
           >
             <Zap size={19} />
           </button>
@@ -617,7 +740,7 @@ export function ChatThread({
             aria-label="Programar envío"
             disabled={!canWrite || !!attachment}
             onClick={() => setPopover(popover === "schedule" ? null : "schedule")}
-            className="hidden size-10 shrink-0 place-items-center rounded-full text-muted disabled:opacity-40 2xl:grid"
+            className="grid size-10 shrink-0 place-items-center rounded-full text-[#54656f] hover:bg-slate-200 disabled:opacity-40"
           >
             <Clock size={19} />
           </button>
@@ -625,14 +748,14 @@ export function ChatThread({
             disabled={busy || !canWrite || (!draft.trim() && !attachment)}
             title="Enviar"
             aria-label="Enviar"
-            className="grid size-10 shrink-0 place-items-center rounded-full bg-primary text-white disabled:opacity-40"
+            className="grid size-10 shrink-0 place-items-center rounded-full bg-[#00a884] text-white disabled:opacity-40"
           >
             <Send size={18} />
           </button>
         </form>
         <p className="px-2 pt-1.5 text-[11px] text-[#667781]">
-          Texto e imágenes por WhatsApp (hasta 8 MB). Enviado, entregado y leído se registran por
-          separado: «leído» no prueba que respondió.
+          Envías texto e imágenes (hasta 8 MB). Audios, videos, documentos y stickers recibidos se
+          ven aquí; enviarlos desde el CRM aún no está disponible.
         </p>
       </div>
     </section>

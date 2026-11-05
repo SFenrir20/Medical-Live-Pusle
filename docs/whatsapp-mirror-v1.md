@@ -13,7 +13,11 @@ usan un transporte simulado y no demuestran conectividad con una cuenta real.**
   qué persona los escribió. Grupos, estados y canales quedan fuera de la bandeja.
 - Imágenes normales JPG/PNG/WebP: recepción, ampliación y envío de hasta 8 MB. Se guardan cifradas
   en el volumen del conector. Ver `crm-omnicanal.md`, migración 0017.
-- Audios, documentos, stickers y archivos de una sola visualización siguen consultándose en el teléfono.
+- Audios, notas de voz, videos, documentos y stickers: se reciben y se ven en la bandeja (reproductor,
+  video, tarjeta de descarga). El conector detecta el tipo real por los bytes, nunca por lo que declara
+  el remitente, y el API lo vuelve a validar. Enviar audio, video o documentos desde el CRM aún no existe
+  (solo texto e imágenes). Los archivos de una sola visualización siguen en el teléfono.
+  Ver `crm-omnicanal.md`, migración 0018.
 - No se importa el historial completo anterior a la vinculación. No es una copia de seguridad
   del WhatsApp ni una garantía de recuperar mensajes de períodos sin conexión.
 - Contacto común por número E.164, incluso si WhatsApp llegó antes de la captura TikTok. Las
@@ -118,6 +122,40 @@ puede ser posterior a ambas. Las apariciones se muestran por separado, sin conta
 teléfono ya existente.
 
 ## Diagnóstico y recuperación
+
+### Recuperación automática y estado de salud
+
+El conector verifica cada 10 segundos si el intento de conexión lleva más de 60 segundos
+o si el transporte de una sesión conectada se cerró sin procesarse su aviso. En esos casos
+retira el socket anterior y reintenta con espera progresiva y variación aleatoria, hasta
+60 segundos entre intentos. Una bandeja sin mensajes no se considera una conexión caída:
+Baileys conserva sus propios heartbeats del protocolo. No se borran credenciales por un timeout.
+Una sesión revocada o reemplazada sigue requiriendo una vinculación explícita.
+
+- `/health`: comprueba que HTTP responde (liveness); incluye `connected`, sin datos personales.
+  Docker usa esta ruta. Que esté sano no significa que WhatsApp esté vinculado.
+- `/ready`: devuelve 200 solo con estado `connected`; devuelve 503 durante desconexión o QR.
+  Es una señal de disponibilidad del transporte, no acredita importación en PostgreSQL.
+- `/status`: requiere el secreto interno. Añade `connected_at`, `retry_at`,
+  `reconnect_attempt`, `last_disconnect_code`, `recovery_reason` y `pending_events`.
+  El API agrega `sync_at` y `sync_ok` usando el heartbeat del worker; la pantalla distingue
+  la conexión de la sincronización y muestra eventos pendientes cuando esta se retrasa.
+
+El cliente interno espera hasta 55 segundos por `/send` (el intento del conector está limitado
+a 45 segundos). Los demás accesos conservan el timeout de 20 segundos. El worker deja de
+iniciar envíos adicionales cuando su tanda consume 15 segundos, para volver a importar
+mensajes entrantes; un envío ya iniciado puede durar su presupuesto completo. Una caída HTTP
+sigue consultando el mismo UUID y un resultado ambiguo nunca se reenvía automáticamente.
+
+Al recibir SIGTERM/SIGINT el conector cancela reconexiones y cierra el transporte sin cerrar
+sesión en WhatsApp. Espera hasta 8 segundos por trabajo en curso; los intentos ambiguos quedan
+persistidos para reconciliación. Conservar el volumen y la clave al recrear el contenedor.
+
+La bandeja consulta de nuevo al recuperar internet, enfocar la ventana o volver a una pestaña
+visible. No solapa consultas del mismo ciclo y cancela las del contexto anterior al cambiar
+filtros o conversación. Las respuestas antiguas no reemplazan la lista del filtro actual.
+Estas mejoras no importan historial previo ni garantizan recuperar todos los mensajes de una
+desconexión. No sustituyen la prueba real de reinicio y caída de red con el número vinculado.
 
 - `Conector no disponible`: comprobar variables y servicio `wa-gateway`.
 - Conectado pero sincronización atrasada: comprobar `wa-worker`, migración y acceso a PostgreSQL.

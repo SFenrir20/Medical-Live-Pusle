@@ -7,12 +7,16 @@ funcionar todavía está marcado así en pantalla.
 ## Qué hay
 
 **Chats (`/whatsapp`)** — bandeja de cuatro columnas:
-- Lista con búsqueda de contactos **y del texto de los mensajes**, y las vistas *Todos*, *Asignados a mí*,
-  *No leídos* y *Archivados* con su contador. Cada fila muestra el último mensaje, la etapa, si viene de un
-  LIVE y quién lo atiende. Abrir un número nuevo desde la lista.
+- Lista con búsqueda de contactos **y del texto de los mensajes**, y las vistas siempre visibles *Todos*,
+  *Míos*, *No leídos*, *Sin responder*, *Sin asignar* y *Archivados* con su contador. Cada fila muestra el
+  último mensaje (con icono: 🎤 voz, 📷 foto, 🎬 video, 📎 documento), la etapa, quién lo atiende y, si la
+  persona escribió y nadie contestó, cuánto lleva esperando (en rojo desde 1 h). Abrir un número nuevo.
+- Sin conversación abierta, el centro muestra el resumen del trabajo (sin responder, no leídos, sin asignar,
+  míos) y quién espera respuesta. El estado de WhatsApp es una insignia con detalle desplegable.
 - Conversación estilo WhatsApp: separadores de día, ✓ enviado / ✓✓ entregado / ✓✓ azul leído, reloj en cola,
   aviso si el envío quedó sin confirmar. Etapa, resultado, marcar como no leído, archivar y buscar dentro del
-  chat. Imágenes JPG/PNG/WebP con vista previa, ampliación y envío (hasta 8 MB). Mensajes pregrabados (botón ⚡ o escribir `/atajo`), emojis y **programar el envío** (reloj).
+  chat. Audios y notas de voz con reproductor (velocidad 1x/1,5x/2x), videos, documentos descargables,
+  stickers e imágenes con ampliación; línea «Mensajes no leídos». Envío de texto e imágenes (hasta 8 MB). Mensajes pregrabados (botón ⚡ o escribir `/atajo`), emojis y **programar el envío** (reloj).
 - Ficha del contacto: etapa CRM, responsable (el supervisor reasigna; la asesora «toma» los libres),
   etiquetas, consentimiento de WhatsApp, notas internas, mensajes programados y la evidencia por LIVE
   (primer envío posterior a cada captura).
@@ -40,7 +44,12 @@ con su tiempo, la audiencia en línea (última muestra) y los teléfonos captado
 
 ## Lo que NO funciona todavía (y por qué)
 
-- **Audios, documentos y stickers:** siguen sin descargarse ni enviarse. Las imágenes normales sí se admiten; las de una sola visualización permanecen en el teléfono.
+- **Enviar audios, videos y documentos desde el CRM:** no existe todavía; solo se reciben y se ven. Los
+  archivos de una sola visualización permanecen en el teléfono.
+- **Mensajes antiguos con «[Audio: consultar en el teléfono]»:** el worker pide al conector, una vez por
+  minuto y por tandas, que vuelva a adjuntar el archivo (hasta 45 días atrás). Solo funciona si el conector
+  aún conserva el mensaje original y WhatsApp todavía entrega el archivo; si no, queda marcado como no
+  disponible y no se vuelve a pedir.
 - **Bots y campañas sobre el WhatsApp real:** siguen desconectados (se prueban en el simulador). El botón
   «Activar automatización» de la ficha está deshabilitado a propósito.
 - **MedicalClic (botones y menús dentro del mensaje):** requiere la API oficial; el espejo no puede enviarlos.
@@ -100,3 +109,18 @@ pestañas ocultas del mismo navegador. El servidor conserva el bloqueo de recone
   última muestra de audiencia y cantidad de teléfonos. No otorga acceso a reportes históricos.
   Marketing conserva sus permisos de reportes. Ambas vistas usan la misma tarjeta de LIVE.
 - Los canales e indicadores reflejan datos conectados: no se muestran Instagram o DM de TikTok ficticios.
+
+## Audios, videos, documentos y stickers (migración 0018)
+
+Reconstruir y desplegar **juntos** `wa-gateway`, `wa-worker`, `api` y `web`: el conector y el worker deben
+actualizarse a la vez (el evento trae ahora el tipo de archivo, su duración, nombre y tamaño). La migración
+0018 se aplica sola al arrancar la API y marca las imágenes existentes como tales. Sin variables nuevas.
+
+- Notas de voz, audios y stickers se descargan al llegar; videos y documentos, al abrirlos. Todo se guarda
+  cifrado en el volumen del conector (límites: audio 16 MB, video y documento 24 MB, sticker 1 MB).
+- `GET /api/whatsapp/messages/{id}/media` exige los mismos permisos que la conversación, comprueba que el
+  archivo pertenece a ese contacto y a un tipo permitido, admite `Range` (para reproducir y saltar en
+  audio y video) y entrega los documentos solo como descarga con el nombre saneado.
+- Algunos navegadores (Safari) no reproducen notas de voz OGG/Opus: el reproductor ofrece descargarlas.
+- La bandeja descarga como máximo 3 archivos a la vez y reutiliza los ya vistos; la lista y las
+  conversaciones solo se vuelven a dibujar si algo cambió, y el estado de WhatsApp se consulta aparte.

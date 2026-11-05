@@ -1,59 +1,25 @@
 import { useEffect, useRef, useState } from "react";
-import { chatApi } from "./api";
+import { useMedia, useNearScreen } from "./useMedia";
 
+/** A photo of a message: loads when it comes near the screen, opens large on click. */
 export function ChatImage({ messageId }: { messageId: number }) {
-  const root = useRef<HTMLDivElement>(null);
-  const [visible, setVisible] = useState(false);
-  const [attempt, setAttempt] = useState(0);
-  const [url, setUrl] = useState("");
-  const [failed, setFailed] = useState(false);
+  const { near, ref } = useNearScreen();
+  const media = useMedia(messageId, near);
   const dialog = useRef<HTMLDialogElement>(null);
-  useEffect(() => {
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting) {
-          setVisible(true);
-          observer.disconnect();
-        }
-      },
-      { rootMargin: "200px" },
-    );
-    if (root.current) observer.observe(root.current);
-    return () => observer.disconnect();
-  }, []);
-  useEffect(() => {
-    if (!visible) return;
-    let cancelled = false,
-      objectUrl = "";
-    setFailed(false);
-    void chatApi
-      .image(messageId)
-      .then((blob) => {
-        if (cancelled) return;
-        objectUrl = URL.createObjectURL(blob);
-        setUrl(objectUrl);
-      })
-      .catch(() => {
-        if (!cancelled) setFailed(true);
-      });
-    return () => {
-      cancelled = true;
-      if (objectUrl) URL.revokeObjectURL(objectUrl);
-    };
-  }, [messageId, visible, attempt]);
   return (
-    <div ref={root} className="min-h-24 min-w-40">
-      {url ? (
+    <div ref={ref} className="min-h-24 min-w-44">
+      {media.status === "ready" ? (
         <>
           <button
             type="button"
             onClick={() => dialog.current?.showModal()}
             aria-label="Abrir imagen"
+            className="block"
           >
             <img
-              src={url}
+              src={media.url}
               alt="Imagen del mensaje"
-              className="max-h-80 max-w-full rounded-lg object-contain"
+              className="max-h-80 max-w-full rounded-md object-contain"
             />
           </button>
           <dialog
@@ -68,21 +34,23 @@ export function ChatImage({ messageId }: { messageId: number }) {
               Cerrar imagen
             </button>
             <img
-              src={url}
+              src={media.url}
               alt="Imagen ampliada"
               className="max-h-[80vh] max-w-full object-contain"
             />
           </dialog>
         </>
-      ) : failed ? (
+      ) : media.status === "error" ? (
         <div className="p-3 text-xs text-amber-800">
           No se pudo recuperar la imagen. Puede haber vencido en WhatsApp.
-          <button type="button" onClick={() => setAttempt((a) => a + 1)} className="ml-2 underline">
+          <button type="button" onClick={media.retry} className="ml-2 underline">
             Reintentar
           </button>
         </div>
       ) : (
-        <span className="text-xs text-muted">Cargando imagen…</span>
+        <div className="grid h-28 w-44 animate-pulse place-items-center rounded-md bg-black/5 text-xs text-muted">
+          Cargando imagen…
+        </div>
       )}
     </div>
   );

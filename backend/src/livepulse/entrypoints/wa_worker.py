@@ -1,17 +1,19 @@
 """One worker instance per mirror. No automation or broadcast execution here."""
 import asyncio
 import logging
+import time
 import traceback
 from pathlib import Path
 
 from ..modules.crm.scheduled import tick as send_scheduled
-from ..modules.whatsapp.service import tick
+from ..modules.whatsapp.service import adopt_old_media, tick
 from ..shared.db import SessionLocal
 
 logger = logging.getLogger(__name__)
 
 
 async def main():
+    last_media_check = 0.0
     while True:
         try:
             await tick(SessionLocal)
@@ -25,6 +27,12 @@ async def main():
             await send_scheduled(SessionLocal)  # messages agents scheduled; same outbox
         except Exception as exc:
             logger.warning('Scheduled messages will retry (error=%s)', type(exc).__name__)
+        if time.monotonic() - last_media_check >= 60:
+            last_media_check = time.monotonic()
+            try:
+                await adopt_old_media(SessionLocal)  # attach files to messages saved as text
+            except Exception as exc:
+                logger.warning('Old media recovery will retry (error=%s)', type(exc).__name__)
         await asyncio.sleep(3)
 
 
