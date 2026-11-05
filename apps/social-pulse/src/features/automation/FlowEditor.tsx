@@ -16,7 +16,7 @@ import {
   useNodesState,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import { ArrowLeft, Play, Save, Trash2 } from "lucide-react";
+import { ArrowLeft, Play, Save, Trash2, Undo2, Redo2 } from "lucide-react";
 import { api, CatalogEntry, Channel, Flow, FlowGraph, problemText, TestResult } from "./api";
 import { Banner, buttonClass, Field, ghostButtonClass, inputClass, Toggle } from "./ui";
 
@@ -31,7 +31,8 @@ const STATUSES = [
 ];
 const DAYS = ["L", "M", "X", "J", "V", "S", "D"];
 const GROUPS: [string, string[]][] = [
-  ["Disparadores", ["trigger.message", "trigger.manual"]],
+  ["Mensaje", ["trigger.message", "trigger.manual", "action.send_text"]],
+  ["MedicalBot", ["action.ai_reply"]],
   [
     "Condiciones",
     ["condition.keyword", "condition.tag", "condition.status", "condition.business_hours"],
@@ -39,12 +40,10 @@ const GROUPS: [string, string[]][] = [
   [
     "Acciones",
     [
-      "action.send_text",
       "action.wait",
       "action.add_tag",
       "action.set_status",
       "action.assign",
-      "action.ai_reply",
       "action.handoff",
       "action.webhook",
       "action.end",
@@ -143,7 +142,11 @@ function toFlow(graph: FlowGraph, catalog: Record<string, CatalogEntry>) {
     id: n.id,
     type: "step",
     position: n.pos ?? { x: 40 + (i % 4) * 250, y: 40 + Math.floor(i / 4) * 150 },
-    data: { kind: n.type, config: n.config ?? {}, label: catalog[n.type]?.label ?? n.type },
+    data: {
+      kind: n.type,
+      config: n.config ?? {},
+      label: String(n.config?._title || catalog[n.type]?.label || n.type),
+    },
   }));
   const edges: Edge[] = graph.edges.map((e) => edgeOf(e.from, e.to, e.when));
   return { nodes, edges };
@@ -198,6 +201,15 @@ function ConfigForm({
   const kind = node.data.kind;
   return (
     <div className="space-y-3">
+      <Field label="Nombre del nodo">
+        <input
+          className={inputClass}
+          maxLength={80}
+          value={String(c._title ?? "")}
+          placeholder={entry?.label}
+          onChange={(e) => set({ _title: e.target.value })}
+        />
+      </Field>
       <div>
         <strong className="text-sm">{entry?.label ?? kind}</strong>
         <p className="mt-1 text-xs text-muted">{entry?.help}</p>
@@ -397,10 +409,35 @@ function Editor({
   const [testText, setTestText] = useState("Hola, quiero información");
   const [result, setResult] = useState<TestResult | null>(null);
   const [busy, setBusy] = useState(false);
+  const [past, setPast] = useState<{ nodes: StepNode[]; edges: Edge[] }[]>([]);
+  const [future, setFuture] = useState<{ nodes: StepNode[]; edges: Edge[] }[]>([]);
+  const remember = useCallback(() => {
+    setPast((old) => [...old.slice(-39), structuredClone({ nodes, edges })]);
+    setFuture([]);
+  }, [nodes, edges]);
+  const undo = () => {
+    const previous = past.at(-1);
+    if (!previous) return;
+    setFuture((old) => [...old, structuredClone({ nodes, edges })]);
+    setPast((old) => old.slice(0, -1));
+    setNodes(previous.nodes);
+    setEdges(previous.edges);
+    setSelected(null);
+  };
+  const redo = () => {
+    const next = future.at(-1);
+    if (!next) return;
+    setPast((old) => [...old, structuredClone({ nodes, edges })]);
+    setFuture((old) => old.slice(0, -1));
+    setNodes(next.nodes);
+    setEdges(next.edges);
+    setSelected(null);
+  };
 
   const onConnect = useCallback(
     (c: Connection) => {
       if (!c.source || !c.target) return;
+      remember();
       setEdges((current) => {
         const kept = current.filter(
           (e) =>
@@ -411,7 +448,7 @@ function Editor({
         return addEdge(edgeOf(c.source, c.target, when), kept);
       });
     },
-    [setEdges],
+    [setEdges, remember],
   );
 
   const isValidConnection = useCallback(
@@ -423,6 +460,7 @@ function Editor({
   );
 
   const add = (kind: string) => {
+    remember();
     const id = `n${Math.random().toString(36).slice(2, 7)}`;
     setNodes((current) => [
       ...current,
@@ -441,16 +479,30 @@ function Editor({
 
   const removeSelected = () => {
     if (!selected) return;
+    remember();
     setNodes((current) => current.filter((n) => n.id !== selected));
     setEdges((current) => current.filter((e) => e.source !== selected && e.target !== selected));
     setSelected(null);
   };
 
   const current = nodes.find((n) => n.id === selected) ?? null;
-  const setConfig = (config: Record<string, unknown>) =>
+  const setConfig = (config: Record<string, unknown>) => {
+    remember();
     setNodes((list) =>
-      list.map((n) => (n.id === selected ? { ...n, data: { ...n.data, config } } : n)),
+      list.map((n) =>
+        n.id === selected
+          ? {
+              ...n,
+              data: {
+                ...n.data,
+                config,
+                label: String(config._title || catalog[n.data.kind]?.label || n.data.kind),
+              },
+            }
+          : n,
+      ),
     );
+  };
 
   const save = async (): Promise<boolean> => {
     setBusy(true);
@@ -513,7 +565,7 @@ function Editor({
 
   return (
     <div className="mt-6">
-      <div className="flex flex-wrap items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3 rounded-t-3xl bg-deep p-4 text-white">
         <button type="button" className={ghostButtonClass} onClick={onBack}>
           <ArrowLeft size={14} className="mr-1 inline" /> Flujos
         </button>
@@ -559,6 +611,29 @@ function Editor({
           )}
         </span>
       </div>
+      <div className="flex items-center gap-2 border-x border-line bg-white px-4 py-2">
+        <button
+          type="button"
+          aria-label="Deshacer"
+          disabled={!canManage || !past.length || busy}
+          onClick={undo}
+          className="rounded-lg p-2 text-primary disabled:opacity-30"
+        >
+          <Undo2 size={16} />
+        </button>
+        <button
+          type="button"
+          aria-label="Rehacer"
+          disabled={!canManage || !future.length || busy}
+          onClick={redo}
+          className="rounded-lg p-2 text-primary disabled:opacity-30"
+        >
+          <Redo2 size={16} />
+        </button>
+        <span className="text-xs text-muted">
+          Arrastra los nodos, conecta sus puntos y selecciona un bloque para editarlo.
+        </span>
+      </div>
       <div className="mt-3 space-y-2">
         {notice && <Banner tone={notice.tone}>{notice.text}</Banner>}
         {warnings.map((w) => (
@@ -578,7 +653,7 @@ function Editor({
         )}
       </div>
 
-      <div className="mt-4 grid gap-4 lg:grid-cols-[200px_minmax(0,1fr)_300px]">
+      <div className="grid gap-0 overflow-hidden rounded-b-3xl border border-line lg:grid-cols-[175px_minmax(0,1fr)_270px]">
         <aside className="space-y-4 rounded-2xl border border-line bg-white p-4">
           {GROUPS.map(([group, kinds]) => (
             <div key={group}>
@@ -603,13 +678,20 @@ function Editor({
           ))}
         </aside>
 
-        <div className="h-[560px] overflow-hidden rounded-2xl border border-line bg-white">
+        <div className="h-[640px] overflow-hidden bg-[#f3f9fa]">
           <ReactFlow
             nodes={nodes}
             edges={edges}
             nodeTypes={nodeTypes}
-            onNodesChange={onNodesChange}
-            onEdgesChange={onEdgesChange}
+            onNodesChange={(changes) => {
+              if (changes.some((c) => c.type === "remove")) remember();
+              onNodesChange(changes);
+            }}
+            onNodeDragStart={() => remember()}
+            onEdgesChange={(changes) => {
+              if (changes.some((c) => c.type === "remove")) remember();
+              onEdgesChange(changes);
+            }}
             onConnect={onConnect}
             isValidConnection={isValidConnection}
             onNodeClick={(_, node) => setSelected(node.id)}
@@ -626,15 +708,17 @@ function Editor({
           </ReactFlow>
         </div>
 
-        <aside className="space-y-4">
+        <aside className="space-y-4 bg-white p-4">
           <div className="rounded-2xl border border-line bg-white p-4">
             {current ? (
               <>
-                <ConfigForm
-                  node={current}
-                  entry={catalog[current.data.kind]}
-                  onChange={setConfig}
-                />
+                <fieldset disabled={!canManage || busy}>
+                  <ConfigForm
+                    node={current}
+                    entry={catalog[current.data.kind]}
+                    onChange={setConfig}
+                  />
+                </fieldset>
                 {canManage && (
                   <button
                     type="button"

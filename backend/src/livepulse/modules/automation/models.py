@@ -21,6 +21,15 @@ from ...shared.db import Base
 PK_BIG = BigInteger().with_variant(Integer, 'sqlite')
 
 
+class StudioSetting(Base):
+    """Saved configuration of the contact widget and message presets, never credentials."""
+    __tablename__ = 'automation_studio_settings'
+    id = Column(String(32), primary_key=True)
+    value = Column(JSON, nullable=False, default=dict)
+    updated_by = Column(String(255))
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
 class Flow(Base):
     """A diagram: nodes and edges stored as JSON (see graph.py). Created disabled."""
     __tablename__ = 'automation_flows'

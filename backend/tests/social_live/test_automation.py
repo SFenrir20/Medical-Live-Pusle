@@ -23,6 +23,53 @@ ROLES = {'root': None, 'jefa': 'jefe_marketing', 'sup': 'supervisor', 'ana': 'ag
 PATIENT = '+51987654321'
 
 
+async def test_widget_settings_persist_and_enforce_admin_permission(world):
+    client, _ = world
+    defaults = (await client.get(f'{AUTO}/studio/widget', headers=person('sup'))).json()
+    assert defaults['position'] == 'right'
+    config = {**defaults, 'title': 'Habla con Medical', 'whatsapp': '+51987654321',
+              'instagram_enabled': True, 'instagram': 'medical.clinica'}
+    assert (await client.put(f'{AUTO}/studio/widget', headers=person('sup'), json=config)).status_code == 403
+    assert (await client.put(f'{AUTO}/studio/widget', headers=person('root'), json=config)).status_code == 200
+    assert (await client.get(f'{AUTO}/studio/widget', headers=person('jefa'))).json() == config
+    for bad in ({'color': 'red;position:fixed'}, {'whatsapp': 'javascript:alert(1)'},
+                {'instagram': 'https://evil.example'}, {'position': 'middle'}):
+        response = await client.put(f'{AUTO}/studio/widget', headers=person('root'), json={**config, **bad})
+        assert response.status_code == 422
+
+
+async def test_message_presets_create_reusable_drafts_and_only_test_in_simulator(world):
+    client, factory = world
+    keys = ['welcome', 'lead', 'appointment', 'followup']
+    items = [{'key': key, 'text': f'Mensaje {key}', 'enabled': True, 'delay_minutes': 5} for key in keys]
+    assert (await client.put(f'{AUTO}/studio/messages', headers=person('jefa'), json={'items': items})).status_code == 403
+    response = await client.put(f'{AUTO}/studio/messages', headers=person('root'), json={'items': items})
+    assert response.status_code == 200, response.text
+    first = response.json()['items']
+    items[0]['text'] = 'Bienvenida actualizada'
+    saved = (await client.put(f'{AUTO}/studio/messages', headers=person('root'), json={'items': items})).json()['items']
+    assert [p['flow_id'] for p in first] == [p['flow_id'] for p in saved]
+    assert (await client.get(f'{AUTO}/studio/messages', headers=person('sup'))).json()['items'] == saved
+    async with factory() as session:
+        for p in saved:
+            flow = await session.get(am.Flow, p['flow_id'])
+            assert flow.channel_id == 'simulador' and not flow.enabled
+            assert graph.validate(flow.graph) == []
+            if p['key'] == 'appointment':
+                assert flow.graph['nodes'][0]['type'] == 'trigger.manual'
+    result = await client.post(f"{AUTO}/flows/{saved[0]['flow_id']}/test", headers=person('root'),
+                               json={'text': 'Hola'})
+    assert result.status_code == 200, result.text
+    assert any(m['body'] == 'Bienvenida actualizada' for m in result.json()['messages'])
+
+
+async def test_message_presets_reject_missing_duplicate_or_blank_stages(world):
+    client, _ = world
+    for items in ([], [{'key': 'welcome', 'text': 'Hola'}] * 4,
+                  [{'key': key, 'text': ' '} for key in ['welcome', 'lead', 'appointment', 'followup']]):
+        assert (await client.put(f'{AUTO}/studio/messages', headers=person('root'), json={'items': items})).status_code == 422
+
+
 def person(name):
     return {'Authorization': f'Bearer user:{name}'}
 
