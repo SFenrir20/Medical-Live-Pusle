@@ -153,3 +153,40 @@ y valor). Cada columna muestra su cantidad de chats y su valor total; carga de a
 API: `GET|POST /api/crm/pipelines`, `GET /templates`, `PATCH /{id}`, `PUT /{id}/stages`, `GET /{id}/board`,
 `GET /{id}/stages/{stage}/cards`, `PUT|DELETE /{id}/cards/{conversation}`, `GET /{id}/metrics`,
 `GET /by-conversation/{id}`. Despliegue: reconstruir `api` y `web`; la migración 0020 se aplica sola.
+
+## Embudo automático por sede (migración 0021)
+
+La Central de Citas ya no tiene que hacer clic, etiquetar ni pasar el chat: cuando **confirma una cita al
+paciente** (el mensaje con *Paciente, Fecha, Hora y Sede*, enviado desde el CRM o desde el teléfono y
+confirmado como enviado), el sistema lo hace solo:
+
+1. Pasa a **Cita agendada** en el embudo «Contactos» (aquí termina el trabajo de la Central).
+2. Pone las etiquetas **Cita agendada**, la **sede** y **Del LIVE** si vino de un LIVE; guarda fecha y hora.
+3. Entra al embudo **«Asesores · {sede}»**: Cita agendada → Asistió → Cotizado → Separado → Operado.
+4. Se asigna al **asesor de esa sede cuyo horario cubre la hora de la cita**. Si se cruzan varios: primero
+   quien esté **conectado**, luego quien tenga **menos pacientes abiertos** (no «el de la mañana siempre
+   primero»), luego quien lleva más tiempo sin recibir uno. Si nadie cubre esa hora, queda **libre en la
+   sede** para que lo tome cualquiera de sus asesores.
+
+- **Cada sede ve solo sus pacientes.** El asesor ve los de su sede (los de sus colegas solo para mirar: no
+  puede escribirles hasta tomarlos) y los libres de su sede; **no** ve los de otras sedes ni su embudo. La
+  Central deja de ver el chat una vez entregado. Supervisor, marketing y gerente ven todo.
+- **Se puede revertir:** cada movimiento queda en la ficha («Cita y sede») con su resumen; un supervisor
+  pulsa «Deshacer el movimiento automático» y el chat vuelve a como estaba (etapa, responsable, etiquetas,
+  sede y embudo). Un mensaje repetido o reenviado no mueve dos veces; si la Central cambia la fecha en la
+  misma sede, el asesor se mantiene.
+- **Sede no reconocida:** igual se marca la cita y las etiquetas, pero no se asigna asesor y la ficha lo
+  avisa («revisa las sedes en Ajustes»).
+- **Configuración (admin, Ajustes → Sedes y asesores):** las sedes iniciales son San Isidro (San Isidro /
+  Lince), Los Olivos, SJM y Ate; cada una con los nombres con que la Central la escribe. A cada asesor se le
+  asigna sede y horario (Lima, igual todos los días) y se puede desactivar. Hay un probador: pega un
+  mensaje y muestra qué entiende, sin mover a nadie.
+- **Rol nuevo `asesor`** (Clerk: `{"livepulse":{"role":"asesor"}}`): mismos permisos de trabajo que el
+  agente; aparece en Ajustes cuando inicia sesión por primera vez. Su pantalla de inicio es el embudo de su sede.
+
+Lo que sigue manual (y por qué): *Asistió, Cotizado, Separado y Operado* no se pueden deducir de un mensaje
+sin falsos positivos; las mueve el asesor (arrastrando la tarjeta). Asistió podría automatizarse si el
+sistema de la clínica avisa de la llegada.
+
+Despliegue: reconstruir `api`, **`wa-worker`** (ahí corre la regla) y `web`; la migración 0021 corre sola.
+Asignar el rol `asesor` en Clerk y configurar sede y horario de cada uno en Ajustes.

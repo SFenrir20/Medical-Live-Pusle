@@ -239,7 +239,7 @@ async def summary(who=Depends(board_reader), session=Depends(get_session)):
 
 async def team_members(session) -> list[dict]:
     rows = (await session.scalars(select(UserRole).where(
-        UserRole.role.in_(('agente_ventas', 'supervisor')))
+        UserRole.role.in_(('agente_ventas', 'asesor', 'supervisor')))
         .order_by(UserRole.display_name, UserRole.user_id))).all()
     return [{'id': r.user_id, 'name': r.display_name or r.user_id, 'role': r.role} for r in rows]
 

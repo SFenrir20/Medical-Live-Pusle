@@ -341,6 +341,14 @@ export function ChatsPage() {
         setFicha(false);
         setScheduleSignal((n) => n + 1);
       }}
+      onRefresh={() => {
+        if (id)
+          void chatApi
+            .detail(id)
+            .then(setDetail)
+            .catch(() => undefined);
+        void refreshList().catch(() => undefined);
+      }}
     />
   );
 

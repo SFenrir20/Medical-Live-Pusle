@@ -103,16 +103,27 @@ function timesTitle(m: Message): string {
 }
 
 const PLACEHOLDER_AFTER_DAYS = 45;
+const AUTHOR_COLORS = ["#00805f", "#7c3aed", "#c2410c", "#0369a1", "#be185d", "#4d7c0f"];
+/** Each person who writes in the conversation keeps their own colour. */
+function authorColor(m: Message): string {
+  const key = m.author_id ?? m.author_kind;
+  let hash = 0;
+  for (const ch of key) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
+  return AUTHOR_COLORS[hash % AUTHOR_COLORS.length];
+}
 
 /** One bubble. Memoised: the thread refreshes every few seconds and only new messages redraw. */
 const MessageRow = memo(function MessageRow({
   m,
   tail,
+  label,
   day,
   unreadDivider,
 }: {
   m: Message;
   tail: boolean;
+  /** Show who wrote it: first of a run, or a different person than the message before. */
+  label: boolean;
   day: string | null;
   unreadDivider: boolean;
 }) {
@@ -153,8 +164,8 @@ const MessageRow = memo(function MessageRow({
               } ${tail ? (out ? "wa-tail-out rounded-tr-none" : "wa-tail-in rounded-tl-none") : ""}`
         }`}
       >
-        {out && tail && !bare && (
-          <p className="mb-0.5 text-xs font-semibold text-[#00805f]">
+        {out && label && !bare && (
+          <p className="mb-0.5 text-xs font-semibold" style={{ color: authorColor(m) }}>
             {m.author_kind === "agent" ? m.author_name || m.author_id : "Desde el teléfono"}
           </p>
         )}
@@ -541,6 +552,12 @@ export function ChatThread({
               m={m}
               day={newDay ? dayLabel(m.at) : null}
               tail={newDay || prev.direction !== m.direction}
+              label={
+                newDay ||
+                prev.direction !== m.direction ||
+                prev.author_id !== m.author_id ||
+                prev.author_kind !== m.author_kind
+              }
               unreadDivider={i === dividerAt}
             />
           );

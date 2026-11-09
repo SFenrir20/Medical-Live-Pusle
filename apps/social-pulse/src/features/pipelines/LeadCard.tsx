@@ -1,5 +1,5 @@
 import { memo, useEffect, useRef, useState } from "react";
-import { MoreVertical, User } from "lucide-react";
+import { CalendarClock, MoreVertical, User } from "lucide-react";
 import { Avatar, Preview } from "@/features/chats/ConversationList";
 import { ago, nice, shortTime, WAIT_LONG_MINUTES, waitedMinutes } from "@/features/chats/format";
 import { type Card, type FunnelStage, money } from "./api";
@@ -135,11 +135,22 @@ export const LeadCard = memo(function LeadCard({
           )}
         </div>
       </div>
+      {card.appointment_label && (
+        <p className="mt-2 flex items-center gap-1.5 rounded-lg bg-slate-50 px-2 py-1 text-[11px] font-semibold text-[#3b4a54]">
+          <CalendarClock size={12} className="shrink-0 text-primary" /> Cita{" "}
+          {card.appointment_label}
+        </p>
+      )}
       <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[11px]">
         <span className="flex items-center gap-1 truncate text-muted">
           <User size={12} />
           {card.is_mine ? "Tuyo" : card.advisor_name || "Sin asignar"}
         </span>
+        {card.site && (
+          <span className="rounded-full bg-indigo-50 px-2 py-0.5 font-semibold text-indigo-700">
+            {card.site}
+          </span>
+        )}
         {card.waiting && (
           <span
             className={`rounded-full px-2 py-0.5 font-semibold ${late ? "bg-red-50 text-red-700" : "bg-amber-50 text-amber-700"}`}

@@ -4,6 +4,7 @@ The stage of a contact is NOT stored here: when the number is a LIVE contact its
 contact's own status (new, contacted, qualified, discarded) so there is one truth for the whole
 app; only a WhatsApp-only number keeps its stage on the conversation."""
 from sqlalchemy import (
+    JSON,
     BigInteger,
     Boolean,
     CheckConstraint,
@@ -91,6 +92,7 @@ class Pipeline(Base):
     name = Column(String(60), nullable=False)
     position = Column(Integer, nullable=False, server_default='0')
     archived = Column(Boolean, nullable=False, server_default=text('false'))
+    site_id = Column(PK_BIG)                              # funnel of one branch (its advisors)
     created_by = Column(String(255))
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
@@ -139,3 +141,45 @@ class PipelineEvent(Base):
     at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
     __table_args__ = (Index('ix_crm_event_stage', 'pipeline_id', 'to_stage_id', 'conversation_id'),)
+
+
+class Site(Base):
+    """A branch (sede). `aliases` are the ways it is written in the appointment message."""
+    __tablename__ = 'crm_sites'
+    id = Column(PK_BIG, primary_key=True, autoincrement=True)
+    key = Column(String(30), nullable=False, unique=True)
+    name = Column(String(60), nullable=False)
+    aliases = Column(JSON, nullable=False, default=list)
+    active = Column(Boolean, nullable=False, server_default=text('true'))
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class Staff(Base):
+    """Where an advisor works and the hours (Lima time, same every day) they attend patients."""
+    __tablename__ = 'crm_staff'
+    user_id = Column(String(255), primary_key=True)
+    site_id = Column(PK_BIG, ForeignKey('crm_sites.id'), nullable=False)
+    shift_start = Column(String(5), nullable=False, server_default='09:00')   # HH:MM
+    shift_end = Column(String(5), nullable=False, server_default='18:00')
+    active = Column(Boolean, nullable=False, server_default=text('true'))
+
+    __table_args__ = (Index('ix_crm_staff_site', 'site_id'),)
+
+
+class AutoLog(Base):
+    """What the automatic rules did to a conversation, with what is needed to undo it."""
+    __tablename__ = 'crm_auto_log'
+    id = Column(PK_BIG, primary_key=True, autoincrement=True)
+    conversation_id = Column(PK_BIG, ForeignKey('chat_conversations.id'), nullable=False)
+    message_id = Column(PK_BIG)
+    kind = Column(String(20), nullable=False)             # appointment
+    summary = Column(String(300), nullable=False)
+    before = Column(JSON)
+    undone_at = Column(DateTime(timezone=True))
+    undone_by = Column(String(255))
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    __table_args__ = (
+        Index('ux_crm_auto_message', 'kind', 'message_id', unique=True),
+        Index('ix_crm_auto_conv', 'conversation_id', 'created_at'),
+    )

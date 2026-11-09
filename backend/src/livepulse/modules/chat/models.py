@@ -64,11 +64,16 @@ class ChatConversation(Base):
     unread = Column(Integer, nullable=False, server_default='0')
     last_inbound_at = Column(DateTime(timezone=True))
     last_message_at = Column(DateTime(timezone=True))
+    # Branch the patient was booked at (set automatically from the appointment message) and when.
+    site_id = Column(PK_BIG)
+    appointment_at = Column(DateTime(timezone=True))
+    appointment_label = Column(String(80))
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
     __table_args__ = (
         UniqueConstraint('channel_id', 'phone', name='uq_chat_conversation_phone'),
         Index('ix_chat_conversations_last', 'last_message_at'),
+        Index('ix_chat_conversations_site', 'site_id'),
     )
 
 

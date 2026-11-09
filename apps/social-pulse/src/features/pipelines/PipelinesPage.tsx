@@ -12,7 +12,9 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { AppNav } from "@/features/shell/AppNav";
-import { problem } from "@/features/chats/api";
+import { chatApi, type ConversationItem, type LiveLead, problem } from "@/features/chats/api";
+import { ConversationDialog } from "@/features/chats/ConversationDialog";
+import { LivePanel } from "@/features/chats/LivePanel";
 import {
   type Board,
   type Card,
@@ -129,6 +131,10 @@ export function PipelinesPage() {
   const [dragged, setDragged] = useState<Card | null>(null);
   const [over, setOver] = useState<number | null>(null);
   const [loadingMore, setLoadingMore] = useState<number | null>(null);
+  const [chat, setChat] = useState<{ id: number; item: ConversationItem | null } | null>(null);
+  const [leads, setLeads] = useState<LiveLead[]>([]);
+  const [liveOpen, setLiveOpen] = useState(false);
+  const [opening, setOpening] = useState(false);
   const expanded = useRef(new Set<number>());
   const currentRef = useRef(current);
   currentRef.current = current;
@@ -143,7 +149,13 @@ export function PipelinesPage() {
     setFunnels(items);
     setCurrent((old) => {
       const wanted = prefer ?? old ?? remembered();
-      return items.find((f) => f.id === wanted)?.id ?? items[0]?.id ?? null;
+      // Without a choice yet, someone who works at a branch starts in that branch's funnel.
+      return (
+        items.find((f) => f.id === wanted)?.id ??
+        items.find((f) => f.site_id)?.id ??
+        items[0]?.id ??
+        null
+      );
     });
   }, []);
   useEffect(() => {
@@ -187,6 +199,22 @@ export function PipelinesPage() {
     };
   }, [mayRead, current, refresh]);
 
+  useEffect(() => {
+    if (!mayRead) return;
+    let stopped = false;
+    const load = () =>
+      void chatApi
+        .liveLeads()
+        .then((rows) => !stopped && setLeads(rows))
+        .catch(() => undefined);
+    load();
+    const timer = window.setInterval(() => !document.hidden && load(), 15000);
+    return () => {
+      stopped = true;
+      window.clearInterval(timer);
+    };
+  }, [mayRead]);
+
   const act = async (work: () => Promise<unknown>) => {
     setError("");
     try {
@@ -213,8 +241,20 @@ export function PipelinesPage() {
     const id = current;
     if (id) void act(() => funnelApi.removeCard(id, card.id));
   };
-  const open = (card: Card) => {
-    window.location.href = `/bandeja?phone=${encodeURIComponent(card.phone)}`;
+  const open = (card: Card) => setChat({ id: card.id, item: card });
+  // A phone from the TikTok LIVE panel opens its conversation in the same window.
+  const openPhone = async (phone: string) => {
+    setOpening(true);
+    setError("");
+    try {
+      const { id } = await chatApi.openPhone(phone);
+      setLiveOpen(false);
+      setChat({ id, item: null });
+    } catch (e) {
+      setError(problem(e));
+    } finally {
+      setOpening(false);
+    }
   };
   const more = async (column: Column) => {
     if (!current) return;
@@ -363,6 +403,13 @@ export function PipelinesPage() {
           >
             <Filter size={14} /> Solo míos
           </button>
+          <button
+            type="button"
+            onClick={() => setLiveOpen(true)}
+            className="rounded-xl border border-line bg-white px-3 py-2 text-xs font-bold text-primary min-[80rem]:hidden"
+          >
+            TikTok LIVE
+          </button>
           {!isDefault && funnel && (
             <button
               type="button"
@@ -386,85 +433,114 @@ export function PipelinesPage() {
         </p>
       )}
 
-      <main className="flex min-h-0 flex-1 gap-3 overflow-x-auto px-4 pb-4 sm:px-6">
-        {!board && !error && <p className="m-auto text-sm text-muted">Cargando embudo…</p>}
-        {stages.map((column) => (
-          <section
-            key={column.id}
-            aria-label={`Etapa ${column.name}`}
-            onDragOver={(e) => {
-              if (dragged) {
+      <div className="flex min-h-0 flex-1 gap-3 px-4 pb-4 sm:px-6">
+        <main className="flex min-h-0 min-w-0 flex-1 gap-3 overflow-x-auto">
+          {!board && !error && <p className="m-auto text-sm text-muted">Cargando embudo…</p>}
+          {stages.map((column) => (
+            <section
+              key={column.id}
+              aria-label={`Etapa ${column.name}`}
+              onDragOver={(e) => {
+                if (dragged) {
+                  e.preventDefault();
+                  setOver(column.id);
+                }
+              }}
+              onDragLeave={() => setOver((v) => (v === column.id ? null : v))}
+              onDrop={(e) => {
                 e.preventDefault();
-                setOver(column.id);
-              }
-            }}
-            onDragLeave={() => setOver((v) => (v === column.id ? null : v))}
-            onDrop={(e) => {
-              e.preventDefault();
-              setOver(null);
-              if (dragged) move(dragged, column.id);
-              setDragged(null);
-            }}
-            className={`flex h-full w-[300px] shrink-0 flex-col rounded-2xl border bg-slate-100/70 ${over === column.id ? "border-primary ring-2 ring-primary/30" : "border-line"}`}
-          >
-            <header
-              className="rounded-t-2xl border-b-[3px] bg-white px-4 py-3"
-              style={{ borderColor: column.color }}
+                setOver(null);
+                if (dragged) move(dragged, column.id);
+                setDragged(null);
+              }}
+              className={`flex h-full w-[300px] shrink-0 flex-col rounded-2xl border bg-slate-100/70 ${over === column.id ? "border-primary ring-2 ring-primary/30" : "border-line"}`}
             >
-              <div className="flex items-center justify-between gap-2">
-                <h2 className="truncate text-sm font-bold" title={column.description ?? undefined}>
-                  {column.name}
-                </h2>
-                <span className="flex items-center gap-1 text-xs font-semibold text-muted">
-                  <MessageCircle size={13} /> {column.count}
-                </span>
+              <header
+                className="rounded-t-2xl border-b-[3px] bg-white px-4 py-3"
+                style={{ borderColor: column.color }}
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <h2
+                    className="truncate text-sm font-bold"
+                    title={column.description ?? undefined}
+                  >
+                    {column.name}
+                  </h2>
+                  <span className="flex items-center gap-1 text-xs font-semibold text-muted">
+                    <MessageCircle size={13} /> {column.count}
+                  </span>
+                </div>
+              </header>
+              <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-2">
+                {column.cards.map((card) => (
+                  <LeadCard
+                    key={card.id}
+                    card={card}
+                    stageId={column.id}
+                    stages={stages}
+                    isDefault={isDefault}
+                    onMove={move}
+                    onValue={setValue}
+                    onRemove={remove}
+                    onOpen={open}
+                    dragging={dragged?.id === card.id}
+                    onDragStart={setDragged}
+                    onDragEnd={() => {
+                      setDragged(null);
+                      setOver(null);
+                    }}
+                  />
+                ))}
+                {!column.cards.length && (
+                  <p className="rounded-xl border border-dashed border-slate-300 p-4 text-center text-xs text-muted">
+                    {q || mine ? "Nada coincide con el filtro." : "Sin chats. Arrastra uno aquí."}
+                  </p>
+                )}
+                {column.has_more && (
+                  <button
+                    type="button"
+                    disabled={loadingMore === column.id}
+                    onClick={() => void more(column)}
+                    className="w-full rounded-lg py-2 text-xs font-semibold text-primary hover:bg-white disabled:opacity-50"
+                  >
+                    {loadingMore === column.id
+                      ? "Cargando…"
+                      : `Ver más (${column.count - column.cards.length})`}
+                  </button>
+                )}
               </div>
-            </header>
-            <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-2">
-              {column.cards.map((card) => (
-                <LeadCard
-                  key={card.id}
-                  card={card}
-                  stageId={column.id}
-                  stages={stages}
-                  isDefault={isDefault}
-                  onMove={move}
-                  onValue={setValue}
-                  onRemove={remove}
-                  onOpen={open}
-                  dragging={dragged?.id === card.id}
-                  onDragStart={setDragged}
-                  onDragEnd={() => {
-                    setDragged(null);
-                    setOver(null);
-                  }}
-                />
-              ))}
-              {!column.cards.length && (
-                <p className="rounded-xl border border-dashed border-slate-300 p-4 text-center text-xs text-muted">
-                  {q || mine ? "Nada coincide con el filtro." : "Sin chats. Arrastra uno aquí."}
-                </p>
-              )}
-              {column.has_more && (
-                <button
-                  type="button"
-                  disabled={loadingMore === column.id}
-                  onClick={() => void more(column)}
-                  className="w-full rounded-lg py-2 text-xs font-semibold text-primary hover:bg-white disabled:opacity-50"
-                >
-                  {loadingMore === column.id
-                    ? "Cargando…"
-                    : `Ver más (${column.count - column.cards.length})`}
-                </button>
-              )}
-            </div>
-            <footer className="rounded-b-2xl border-t border-line bg-white px-4 py-2 text-xs text-muted">
-              Valor: <strong className="text-ink">{money(column.value_cents)}</strong>
-            </footer>
-          </section>
-        ))}
-      </main>
+              <footer className="rounded-b-2xl border-t border-line bg-white px-4 py-2 text-xs text-muted">
+                Valor: <strong className="text-ink">{money(column.value_cents)}</strong>
+              </footer>
+            </section>
+          ))}
+        </main>
+        <div className="hidden w-[270px] shrink-0 overflow-hidden rounded-2xl border border-line bg-white min-[80rem]:flex [&>aside]:w-full [&>aside]:border-l-0">
+          <LivePanel leads={leads} onOpen={(phone) => void openPhone(phone)} opening={opening} />
+        </div>
+      </div>
 
+      {chat && (
+        <ConversationDialog
+          key={chat.id}
+          conversationId={chat.id}
+          item={chat.item}
+          onClose={() => setChat(null)}
+          onChanged={() => void refresh().catch(() => undefined)}
+        />
+      )}
+      {liveOpen && (
+        <div className="fixed inset-0 z-40 flex flex-col bg-white min-[80rem]:hidden">
+          <button
+            type="button"
+            onClick={() => setLiveOpen(false)}
+            className="border-b border-line p-4 text-right text-primary"
+          >
+            Cerrar TikTok LIVE
+          </button>
+          <LivePanel leads={leads} onOpen={(phone) => void openPhone(phone)} opening={opening} />
+        </div>
+      )}
       {dialog === "new" && (
         <NewFunnelDialog
           templates={templates}

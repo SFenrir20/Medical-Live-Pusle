@@ -2,7 +2,7 @@ import apiClient from "@/services/api";
 import type { ConversationItem } from "@/features/chats/api";
 
 /** Funnels (embudos) of the CRM: /api/crm/pipelines. The server decides who may move or edit. */
-export type Funnel = { id: number; name: string; default: boolean };
+export type Funnel = { id: number; name: string; default: boolean; site_id?: number | null };
 export type FunnelStage = {
   id: number;
   name: string;

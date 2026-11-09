@@ -17,12 +17,13 @@ from ...shared.db import get_session
 from ..chat.models import ChatConversation
 from ..chat.service import utcnow
 from ..social_live.models import PhoneRegistry
-from . import funnels
+from . import funnels, sites
 from .api import (
     build_items,
     in_scope,
     manager,
     matching,
+    perms,
     reader,
     set_stage,
     stage_of,
@@ -49,10 +50,17 @@ def pipeline_item(pipeline: Pipeline) -> dict:
     return {'id': pipeline.id, 'name': pipeline.name, 'default': pipeline.key == funnels.DEFAULT_KEY}
 
 
-async def load(session, pipeline_id: int, *, active: bool = True) -> Pipeline:
+async def can_see(session, pipeline: Pipeline, who) -> bool:
+    """The funnel of a branch is seen by that branch's advisors and by who may see everything."""
+    if pipeline.site_id is None or 'wa:read_all' in perms(who):
+        return True
+    return pipeline.site_id in await sites.site_ids_of(session, who['user_id'])
+
+
+async def load(session, pipeline_id: int, who, *, active: bool = True) -> Pipeline:
     await funnels.ensure_default(session)
     pipeline = await session.get(Pipeline, pipeline_id)
-    if pipeline is None or (active and pipeline.archived):
+    if pipeline is None or (active and pipeline.archived) or not await can_see(session, pipeline, who):
         raise HTTPException(404, 'Embudo no encontrado.')
     return pipeline
 
@@ -102,7 +110,8 @@ async def list_pipelines(who=Depends(reader), session=Depends(get_session)):
     rows = (await session.scalars(select(Pipeline).where(Pipeline.archived.is_(False)).order_by(
         Pipeline.position, Pipeline.id))).all()
     await session.commit()
-    return {'items': [pipeline_item(p) for p in rows]}
+    visible = [p for p in rows if await can_see(session, p, who)]
+    return {'items': [{**pipeline_item(p), 'site_id': p.site_id} for p in visible]}
 
 
 @router.get('/templates')
@@ -149,7 +158,7 @@ class PipelinePatch(BaseModel):
 @router.patch('/{pipeline_id}')
 async def patch_pipeline(pipeline_id: int, body: PipelinePatch, who=Depends(manager),
                          session=Depends(get_session)):
-    pipeline = await load(session, pipeline_id, active=False)
+    pipeline = await load(session, pipeline_id, who, active=False)
     if is_default(pipeline):
         raise HTTPException(409, 'El embudo «Contactos» refleja el estado del contacto y no se edita.')
     if body.name is not None:
@@ -176,7 +185,7 @@ async def save_stages(pipeline_id: int, body: StagesIn, who=Depends(manager),
                       session=Depends(get_session)):
     """The whole list of stages, in order (what the builder saves). A stage that still holds
     conversations cannot be removed: move them first."""
-    pipeline = await load(session, pipeline_id)
+    pipeline = await load(session, pipeline_id, who)
     if is_default(pipeline):
         raise HTTPException(409, 'El embudo «Contactos» refleja el estado del contacto y no se edita.')
     if any(not COLOR.match(s.color) for s in body.stages):
@@ -210,7 +219,7 @@ async def save_stages(pipeline_id: int, body: StagesIn, who=Depends(manager),
 @router.get('/{pipeline_id}/board')
 async def board(pipeline_id: int, q: str = Query('', max_length=100), mine: bool = False,
                 who=Depends(reader), session=Depends(get_session)):
-    pipeline = await load(session, pipeline_id)
+    pipeline = await load(session, pipeline_id, who)
     stages = await funnels.stages_of(session, pipeline.id)
     key = stage_key(pipeline)
     base = cards_select(who, pipeline, q, mine)
@@ -235,7 +244,7 @@ async def board(pipeline_id: int, q: str = Query('', max_length=100), mine: bool
 async def more_cards(pipeline_id: int, stage_id: int, offset: int = Query(0, ge=0),
                      q: str = Query('', max_length=100), mine: bool = False,
                      who=Depends(reader), session=Depends(get_session)):
-    pipeline = await load(session, pipeline_id)
+    pipeline = await load(session, pipeline_id, who)
     stage = await session.get(PipelineStage, stage_id)
     if stage is None or stage.pipeline_id != pipeline.id:
         raise HTTPException(404, 'Etapa no encontrada.')
@@ -253,7 +262,7 @@ class CardIn(BaseModel):
 async def put_card(pipeline_id: int, conversation_id: int, body: CardIn, who=Depends(reader),
                    session=Depends(get_session)):
     """Add a conversation to a funnel, move it to another stage, or set its value."""
-    pipeline = await load(session, pipeline_id)
+    pipeline = await load(session, pipeline_id, who)
     conversation, registry = await writable(session, conversation_id, who)
     stages = {s.id: s for s in await funnels.stages_of(session, pipeline.id)}
     target = None
@@ -303,7 +312,7 @@ async def put_card(pipeline_id: int, conversation_id: int, body: CardIn, who=Dep
 @router.delete('/{pipeline_id}/cards/{conversation_id}', status_code=204)
 async def remove_card(pipeline_id: int, conversation_id: int, who=Depends(reader),
                       session=Depends(get_session)):
-    pipeline = await load(session, pipeline_id)
+    pipeline = await load(session, pipeline_id, who)
     if is_default(pipeline):
         raise HTTPException(409, 'En «Contactos» cada conversación cambia de etapa, no se quita.')
     await writable(session, conversation_id, who)
@@ -318,7 +327,7 @@ async def remove_card(pipeline_id: int, conversation_id: int, who=Depends(reader
 async def metrics(pipeline_id: int, who=Depends(reader), session=Depends(get_session)):
     """Per stage: how many are in it now and how many ever entered it (from the log of moves,
     which starts when funnels were introduced)."""
-    pipeline = await load(session, pipeline_id)
+    pipeline = await load(session, pipeline_id, who)
     key = stage_key(pipeline)
     base = cards_select(who, pipeline, '', False)
     visible = in_scope(visible_conversations(who), 'all', who['user_id']).with_only_columns(
@@ -352,6 +361,8 @@ async def of_conversation(conversation_id: int, who=Depends(reader), session=Dep
               'value_cents': int(cards[default.id].value_cents) if default.id in cards else 0}]
     for pipeline in (await session.scalars(select(Pipeline).where(
             Pipeline.archived.is_(False), Pipeline.key.is_(None)).order_by(Pipeline.position))).all():
+        if not await can_see(session, pipeline, who):
+            continue
         card = cards.get(pipeline.id)
         items.append({'pipeline_id': pipeline.id, 'name': pipeline.name, 'default': False,
                       'stage_id': card.stage_id if card else None,

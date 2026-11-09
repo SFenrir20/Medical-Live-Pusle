@@ -18,7 +18,7 @@ def jwks_client(issuer: str):
     return PyJWKClient(f"{issuer}/.well-known/jwks.json", timeout=5)
 
 
-ROLE_CODES = ('agente_ventas', 'gerente', 'jefe_marketing', 'supervisor')
+ROLE_CODES = ('agente_ventas', 'asesor', 'gerente', 'jefe_marketing', 'supervisor')
 METADATA_KEY = 'livepulse'
 _directory: dict[str, tuple[float, str | None]] = {}
 DIRECTORY_TTL = 60.0

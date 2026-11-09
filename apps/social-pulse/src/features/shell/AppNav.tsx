@@ -7,6 +7,7 @@ import { usePresence } from "@/features/presence/usePresence";
 
 const ROLE_LABEL: Record<string, string> = {
   agente_ventas: "Agente call center",
+  asesor: "Asesor",
   gerente: "Gerente",
   jefe_marketing: "Jefe de Marketing",
   supervisor: "Supervisor",
@@ -18,7 +19,7 @@ const ROLE_LABEL: Record<string, string> = {
 export function AppNav() {
   const { user, logout } = useAuth();
   const permissions = user?.permissions ?? [];
-  const onShift = user?.role === "agente_ventas";
+  const onShift = user?.role === "agente_ventas" || user?.role === "asesor";
   const { presence, failed, setStatus } = usePresence(onShift);
   const path = window.location.pathname;
   const active = ["/bandeja", "/whatsapp"].includes(path)

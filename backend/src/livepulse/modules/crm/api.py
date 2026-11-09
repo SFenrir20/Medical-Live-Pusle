@@ -29,8 +29,8 @@ from ..social_live.models import CapturedPhone, PhoneRegistry
 from ..social_live.security import require_scope
 from ..whatsapp import api as wa_api
 from ..whatsapp import service as wa
-from . import funnels
-from .models import ChatConsent, ChatNote, ChatScheduled, QuickReply
+from . import funnels, sites
+from .models import ChatConsent, ChatNote, ChatScheduled, QuickReply, Site
 
 router = APIRouter(prefix='/api/crm', tags=['crm'])
 reader = require_scope('wa:read')
@@ -71,7 +71,7 @@ def visible_conversations(who):
         PhoneRegistry, PhoneRegistry.phone == ChatConversation.phone).where(
         ChatConversation.channel_id == wa.CHANNEL)
     if 'wa:read_all' not in perms(who):
-        query = query.where(or_(owner_expr().is_(None), owner_expr() == who['user_id']))
+        query = query.where(sites.visible_to(who['user_id'], owner_expr()))
     return query
 
 
@@ -121,6 +121,9 @@ async def build_items(session, rows, who) -> list[dict]:
         lives = dict((await session.execute(select(CapturedPhone.phone, func.count()).where(
             CapturedPhone.phone.in_(phones)).group_by(CapturedPhone.phone))).all())
     names = await names_of(session, {owner_of(c, r) for c, r in rows})
+    site_ids = {c.site_id for c, _ in rows if c.site_id}
+    site_names = dict((await session.execute(select(Site.id, Site.name).where(
+        Site.id.in_(site_ids)))).all()) if site_ids else {}
     me = who['user_id']
     items = []
     for conversation, registry in rows:
@@ -139,6 +142,9 @@ async def build_items(session, rows, who) -> list[dict]:
             'waiting': bool(last.get(conversation.id) and last[conversation.id].direction == 'in'),
             'consent': status, 'opted_out': conversation.phone in opted,
             'origin': 'tiktok_live' if registry else 'whatsapp',
+            'site': site_names.get(conversation.site_id),
+            'appointment_at': iso(conversation.appointment_at),
+            'appointment_label': conversation.appointment_label,
             'lives': lives.get(conversation.phone, 0)})
     return items
 
@@ -481,9 +487,11 @@ def registry_visibility(who):
     me = who['user_id']
     if 'wa:read_all' in perms(who) or 'contacts:read_all' in perms(who):
         return None
+    mine = ChatConversation.site_id.in_(sites.my_sites(me))
     if settings.auto_assignment:
-        return PhoneRegistry.advisor_id == me
-    return or_(PhoneRegistry.advisor_id.is_(None), PhoneRegistry.advisor_id == me)
+        return or_(PhoneRegistry.advisor_id == me, mine)
+    return or_(and_(PhoneRegistry.advisor_id.is_(None), ChatConversation.site_id.is_(None)),
+               PhoneRegistry.advisor_id == me, mine)
 
 
 @router.get('/contacts')
@@ -517,7 +525,7 @@ async def contacts(q: str = Query('', max_length=100),
         ChatConversation.channel_id == wa.CHANNEL,
         ~exists(select(PhoneRegistry.id).where(PhoneRegistry.phone == ChatConversation.phone)))
     if 'wa:read_all' not in perms(who):
-        only = only.where(or_(ChatConversation.advisor_id.is_(None), ChatConversation.advisor_id == me))
+        only = only.where(sites.visible_to(me, ChatConversation.advisor_id))
     if stage:
         only = only.where(ChatConversation.stage == stage)
     if needle:
@@ -582,8 +590,7 @@ async def summary(who=Depends(reader), session=Depends(get_session)):
     in_chat = select(func.count()).select_from(ChatConversation).where(
         ChatConversation.channel_id == wa.CHANNEL, ChatConversation.archived.is_(False))
     if 'wa:read_all' not in perms(who):
-        in_chat = in_chat.where(or_(ChatConversation.advisor_id.is_(None),
-                                    ChatConversation.advisor_id == who['user_id']))
+        in_chat = in_chat.where(sites.visible_to(who['user_id'], ChatConversation.advisor_id))
     result = {'contacts': contacts_total, 'ready_for_whatsapp': await session.scalar(ready) or 0,
               'conversations': await session.scalar(in_chat) or 0, 'campaigns': None,
               'automations': None}

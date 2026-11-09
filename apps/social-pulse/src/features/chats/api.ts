@@ -29,6 +29,10 @@ export type ConversationItem = {
     seconds?: number | null;
     name?: string | null;
   } | null;
+  /** Branch the patient was booked at and the appointment, set by the automatic rule. */
+  site?: string | null;
+  appointment_at?: string | null;
+  appointment_label?: string | null;
   /** The last message is from the person and nobody has answered yet. */
   waiting?: boolean;
   consent: Consent;
@@ -257,3 +261,20 @@ export function problem(
   }
   return fallback;
 }
+
+export type AutoEntry = {
+  id: number;
+  kind: string;
+  summary: string;
+  at: string | null;
+  undone: boolean;
+};
+export const autoApi = {
+  log: async (conversation: number) =>
+    (
+      await apiClient.get<{ items: AutoEntry[]; can_undo: boolean }>("/crm/automation/log", {
+        params: { conversation_id: conversation },
+      })
+    ).data,
+  undo: async (id: number) => (await apiClient.post(`/crm/automation/${id}/undo`)).data,
+};

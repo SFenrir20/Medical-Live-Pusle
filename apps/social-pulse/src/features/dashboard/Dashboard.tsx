@@ -74,6 +74,7 @@ const MARKETING_ICONS: Record<MarketingView, typeof Activity> = {
 
 const ROLE_LABEL: Record<string, string> = {
   agente_ventas: "Agente call center",
+  asesor: "Asesor",
   gerente: "Gerente",
   jefe_marketing: "Jefe de Marketing",
   supervisor: "Supervisor",

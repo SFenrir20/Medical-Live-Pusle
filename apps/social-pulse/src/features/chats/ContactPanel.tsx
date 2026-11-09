@@ -1,10 +1,98 @@
-import { FormEvent, useRef, useState } from "react";
-import { Bot, CalendarClock, Copy, Phone, StickyNote, Tag, Trash2, X } from "lucide-react";
-import type { CrmDetail, Stage, TeamMember, Thread } from "./api";
+import { FormEvent, useEffect, useRef, useState } from "react";
+import { Bot, CalendarClock, Copy, MapPin, Phone, StickyNote, Tag, Trash2, X } from "lucide-react";
+import {
+  type AutoEntry,
+  autoApi,
+  type CrmDetail,
+  problem,
+  type Stage,
+  type TeamMember,
+  type Thread,
+} from "./api";
 import { Avatar } from "./ConversationList";
 import { fullDate, nice, STAGES, TAG_SUGGESTIONS } from "./format";
 
 const label = "text-[10px] font-bold uppercase tracking-[0.14em] text-muted";
+
+/** Branch, appointment and what the automatic rule did to this patient (a supervisor can undo it). */
+function AutoSection({ detail, onUndone }: { detail: CrmDetail; onUndone: () => void }) {
+  const [entries, setEntries] = useState<AutoEntry[]>([]);
+  const [canUndo, setCanUndo] = useState(false);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    let stopped = false;
+    void autoApi
+      .log(detail.id)
+      .then((r) => {
+        if (stopped) return;
+        setEntries(r.items);
+        setCanUndo(r.can_undo);
+      })
+      .catch(() => undefined);
+    return () => {
+      stopped = true;
+    };
+  }, [detail.id, detail.stage, detail.site, detail.advisor_id]);
+  if (!detail.site && !detail.appointment_label && !entries.length) return null;
+  const latest = entries.find((e) => !e.undone);
+  return (
+    <section>
+      <p className={label}>Cita y sede</p>
+      {(detail.site || detail.appointment_label) && (
+        <p className="mt-2 flex items-start gap-2 text-sm font-semibold">
+          <MapPin size={15} className="mt-0.5 shrink-0 text-primary" />
+          <span>
+            {detail.site ?? "Sede sin identificar"}
+            {detail.appointment_label && (
+              <span className="block text-xs font-normal text-muted">
+                {detail.appointment_label}
+              </span>
+            )}
+          </span>
+        </p>
+      )}
+      {entries.slice(0, 3).map((e) => (
+        <p
+          key={e.id}
+          className={`mt-2 rounded-lg bg-slate-50 p-2 text-xs ${e.undone ? "text-muted line-through" : ""}`}
+        >
+          <Bot size={12} className="mr-1 inline" /> {e.summary}
+          {e.at && <span className="block text-[10px] text-muted">{fullDate(e.at)}</span>}
+        </p>
+      ))}
+      {error && (
+        <p role="alert" className="mt-2 text-xs text-red-700">
+          {error}
+        </p>
+      )}
+      {canUndo && latest && (
+        <button
+          type="button"
+          disabled={busy}
+          onClick={() => {
+            if (
+              !window.confirm(
+                "¿Deshacer el movimiento automático? La conversación vuelve a como estaba.",
+              )
+            )
+              return;
+            setBusy(true);
+            setError("");
+            autoApi
+              .undo(latest.id)
+              .then(onUndone)
+              .catch((e) => setError(problem(e)))
+              .finally(() => setBusy(false));
+          }}
+          className="mt-2 text-xs font-semibold text-primary underline disabled:opacity-50"
+        >
+          Deshacer el movimiento automático
+        </button>
+      )}
+    </section>
+  );
+}
 
 export function ContactPanel({
   detail,
@@ -22,6 +110,7 @@ export function ContactPanel({
   onCancelScheduled,
   onConsent,
   onSchedule,
+  onRefresh,
 }: {
   detail: CrmDetail | null;
   thread: Thread | null;
@@ -38,6 +127,7 @@ export function ContactPanel({
   onCancelScheduled: (id: number) => void;
   onConsent: (status: "granted" | "revoked", note: string) => void;
   onSchedule: () => void;
+  onRefresh: () => void;
 }) {
   const [tag, setTag] = useState("");
   const [note, setNote] = useState("");
@@ -118,6 +208,8 @@ export function ContactPanel({
             ))}
           </select>
         </section>
+
+        <AutoSection detail={detail} onUndone={onRefresh} />
 
         <section>
           <p className={label}>Responsable</p>

@@ -10,6 +10,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.exc import IntegrityError
 
 from ..analytics.models import MonitorState
+from ..chat import hooks
 from ..chat.models import ChatChannel, ChatConversation, ChatMessage
 from ..chat.service import aware, get_conversation
 from ..social_live.contacts import set_status
@@ -166,6 +167,14 @@ async def apply_receipt(session, message):
         message.error = None
 
 
+async def after_send(session, message):
+    """A message was confirmed (or seen) as sent: count the contact, then let the rules listen."""
+    await record_contact(session, message)
+    if message.direction == 'out' and message.status in ('sent', 'delivered', 'read'):
+        conversation = await session.get(ChatConversation, message.conversation_id)
+        await hooks.run_outbound(session, conversation, message)
+
+
 async def record_contact(session, message):
     """An actual agent send is evidence; queue insertion and device messages are not attribution."""
     if message.author_kind != 'agent' or not message.sent_at:
@@ -209,7 +218,7 @@ async def ingest(session, event):
             ChatMessage.external_id == external_id))
         if message:
             await apply_receipt(session, message)
-            await record_contact(session, message)
+            await after_send(session, message)
     elif event['type'] == 'message':
         conversation = await conversation_for(session, phone, event.get('name'))
         message = await session.scalar(select(ChatMessage).where(
@@ -247,7 +256,7 @@ async def ingest(session, event):
             conversation.last_message_at = at
         await session.flush()
         await apply_receipt(session, message)
-        await record_contact(session, message)
+        await after_send(session, message)
     else:
         raise MirrorEventError('unknown_event_type')
     session.add(MirrorEvent(id=event['id']))
@@ -376,7 +385,7 @@ async def tick(factory):
             else:
                 message.error = 'Envío sin confirmar. Comprueba WhatsApp antes de enviar otro mensaje.'
             await apply_receipt(session, message)
-            await record_contact(session, message)
+            await after_send(session, message)
     async with factory() as session, session.begin():
         heartbeat = await session.get(MonitorState, 'whatsapp-worker')
         if heartbeat is None:
