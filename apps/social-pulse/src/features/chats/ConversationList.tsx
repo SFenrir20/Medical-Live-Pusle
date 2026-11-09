@@ -68,7 +68,7 @@ const KIND_ICON = {
   sticker: Smile,
 } as const;
 
-function Preview({ c }: { c: ConversationItem }) {
+export function Preview({ c }: { c: ConversationItem }) {
   if (!c.last) return <span className="truncate">Sin mensajes aún</span>;
   const { kind, text } = previewOf(c.last);
   const Icon = kind ? KIND_ICON[kind] : null;

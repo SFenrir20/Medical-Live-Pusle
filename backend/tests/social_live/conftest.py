@@ -29,7 +29,8 @@ TABLES = [m.TiktokAccount.__table__, m.Tiktoker.__table__, m.Live.__table__,
           automation.Broadcast.__table__, automation.BroadcastRecipient.__table__,
           automation.AutomationAudit.__table__, whatsapp.MirrorEvent.__table__, whatsapp.MirrorReceipt.__table__,
           crm.ChatNote.__table__, crm.ChatScheduled.__table__, crm.ChatConsent.__table__,
-          crm.QuickReply.__table__]
+          crm.QuickReply.__table__, crm.Pipeline.__table__, crm.PipelineStage.__table__,
+          crm.PipelineCard.__table__, crm.PipelineEvent.__table__]
 
 
 @pytest.fixture

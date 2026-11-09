@@ -124,3 +124,32 @@ actualizarse a la vez (el evento trae ahora el tipo de archivo, su duración, no
 - Algunos navegadores (Safari) no reproducen notas de voz OGG/Opus: el reproductor ofrece descargarlas.
 - La bandeja descarga como máximo 3 archivos a la vez y reutiliza los ya vistos; la lista y las
   conversaciones solo se vuelven a dibujar si algo cambió, y el estado de WhatsApp se consulta aparte.
+
+## Embudos (migración 0020)
+
+Pantalla **Embudos** (`/embudos`, en el menú principal): un tablero Kanban con una columna por etapa y una
+tarjeta por conversación (avatar, último mensaje con su icono, no leídos, responsable, tiempo sin responder
+y valor). Cada columna muestra su cantidad de chats y su valor total; carga de a 30 con «Ver más».
+
+- **Varios embudos.** El selector del encabezado cambia de embudo; supervisor y admin (`crm:manage`) crean
+  uno con «Agregar embudo» (plantillas TikTok LIVE a cita, WhatsApp a paciente, Reactivación o en blanco).
+- **«Contactos» es el embudo de siempre**: sus columnas son el estado del contacto (Nuevo, Contactado, Cita
+  agendada, Descartado). Mover una tarjeta ahí cambia ese estado, igual que hacerlo desde la bandeja: sigue
+  habiendo una sola etapa por contacto, con su auditoría. No se edita.
+- **Los demás embudos son independientes**: un chat entra solo si alguien lo agrega («Agregar chats») y
+  puede estar en varios a la vez, cada uno con su etapa.
+- **Mover** = arrastrar la tarjeta, o su menú ⋮ → «Mover a» (sirve con teclado y pantalla táctil). **Valor**
+  = clic en «+ Valor» (soles).
+- **Quién puede qué:** ve las tarjetas de las conversaciones que ya puede ver; mover, agregar o poner valor
+  exige que el chat sea suyo (o ser supervisor); jefatura y gerencia solo miran. Crear, renombrar, archivar
+  y editar etapas es `crm:manage`.
+- **Configuración** (constructor): nombre, etapas (orden, color, descripción), y por etapa cuántos entraron
+  y qué porcentaje de la anterior. Una etapa con chats no se puede eliminar hasta moverlos. Las cifras salen
+  del registro de movimientos (`crm_pipeline_events`), que **empieza al activar esta función**: no incluye lo
+  anterior, y los cambios de estado hechos desde el flujo de contactos fuera del CRM no se registran.
+- **Todavía no:** automatizaciones al entrar a una etapa (asignar, enviar mensaje, activar flujo) y filtros
+  avanzados; el arrastre no funciona con el dedo (usa «Mover a»).
+
+API: `GET|POST /api/crm/pipelines`, `GET /templates`, `PATCH /{id}`, `PUT /{id}/stages`, `GET /{id}/board`,
+`GET /{id}/stages/{stage}/cards`, `PUT|DELETE /{id}/cards/{conversation}`, `GET /{id}/metrics`,
+`GET /by-conversation/{id}`. Despliegue: reconstruir `api` y `web`; la migración 0020 se aplica sola.
