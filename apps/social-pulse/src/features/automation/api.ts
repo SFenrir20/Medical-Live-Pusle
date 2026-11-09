@@ -1,4 +1,5 @@
 import apiClient from "@/services/api";
+import type { WidgetConfig, MessagePreset } from "./studio.types";
 
 /** Everything under /api/automation and /api/chat. Writes need the admin role (the server
  *  decides; the screens only hide what the person could not do anyway). */
@@ -131,6 +132,18 @@ const send = async <T>(method: "post" | "put" | "patch" | "delete", url: string,
   (await apiClient.request<T>({ method, url, data: body })).data;
 
 export const api = {
+  widget: () => get<WidgetConfig>("/automation/studio/widget"),
+  saveWidget: (body: WidgetConfig) => send<WidgetConfig>("put", "/automation/studio/widget", body),
+  presets: () => get<{ items: MessagePreset[] }>("/automation/studio/messages"),
+  savePresets: (items: MessagePreset[]) =>
+    send<{ items: MessagePreset[] }>("put", "/automation/studio/messages", {
+      items: items.map(({ key, text, enabled, delay_minutes }) => ({
+        key,
+        text,
+        enabled,
+        delay_minutes,
+      })),
+    }),
   overview: () => get<Overview>("/automation/overview"),
   createChannel: (body: { id: string; kind: Channel["kind"]; name: string }) =>
     send<Channel>("post", "/automation/channels", body),

@@ -11,7 +11,9 @@ import {
   Workflow,
 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
-import { AutomationPanel } from "@/features/automation/AutomationPanel";
+import { MedicalBotWizard } from "@/features/automation/MedicalBotWizard";
+import { MedicalClic } from "@/features/automation/MedicalClic";
+import { PresetMessages } from "@/features/automation/PresetMessages";
 import { api as automationApi, Overview } from "@/features/automation/api";
 import { BroadcastsTab } from "@/features/automation/BroadcastsTab";
 import { chatApi, ContactRow, problem, Stage, Summary } from "@/features/chats/api";
@@ -248,8 +250,14 @@ function Contacts({ mayAssign }: { mayAssign: boolean }) {
   );
 }
 
-function Automations({ canManageReplies }: { canManageReplies: boolean }) {
-  const [open, setOpen] = useState<"bot" | "replies" | null>(null);
+function Automations({
+  canManageReplies,
+  canManage,
+}: {
+  canManageReplies: boolean;
+  canManage: boolean;
+}) {
+  const [open, setOpen] = useState<"bot" | "replies" | "widget" | null>(null);
   const cards = [
     {
       key: "bot" as const,
@@ -270,13 +278,13 @@ function Automations({ canManageReplies }: { canManageReplies: boolean }) {
       enabled: true,
     },
     {
-      key: null,
+      key: "widget" as const,
       icon: <MousePointerClick size={22} />,
       tone: "bg-sky-50 text-sky-700",
       title: "MedicalClic",
-      text: "Botones, menús y llamadas a la acción dentro del mensaje. Necesita la API oficial de WhatsApp: el espejo no puede enviarlos.",
-      action: "Requiere API oficial",
-      enabled: false,
+      text: "Un componente para tu web con enlaces de WhatsApp, Instagram y Messenger. Personaliza sus colores y copia el código.",
+      action: "Crear MedicalClic",
+      enabled: true,
     },
   ];
   return (
@@ -319,10 +327,21 @@ function Automations({ canManageReplies }: { canManageReplies: boolean }) {
         los bots y los envíos masivos pueden hacer que restrinjan el número, y solo el administrador
         puede encenderlos.
       </p>
-      {open === "replies" && <QuickRepliesManager canManage={canManageReplies} />}
+      {open === "replies" && (
+        <>
+          <PresetMessages canManage={canManage} />
+          <details className="mt-5 rounded-2xl border border-line bg-white p-5">
+            <summary className="cursor-pointer text-sm font-bold">
+              Biblioteca de respuestas manuales y atajos para las asesoras
+            </summary>
+            <QuickRepliesManager canManage={canManageReplies} />
+          </details>
+        </>
+      )}
+      {open === "widget" && <MedicalClic canManage={canManage} />}
       {open === "bot" && (
         <div className="mt-2">
-          <AutomationPanel />
+          <MedicalBotWizard />
         </div>
       )}
     </>
@@ -473,7 +492,10 @@ export function CrmPage() {
             </>
           )}
           {tab === "automations" && (
-            <Automations canManageReplies={permissions.includes("crm:manage")} />
+            <Automations
+              canManageReplies={permissions.includes("crm:manage")}
+              canManage={overview?.can_manage ?? false}
+            />
           )}
         </div>
       </main>

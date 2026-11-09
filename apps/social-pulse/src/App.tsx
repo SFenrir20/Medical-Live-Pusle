@@ -6,6 +6,7 @@ import { LoginScreen } from "@/features/auth/LoginScreen";
 import { Dashboard } from "@/features/dashboard/Dashboard";
 import { TikTokConnection } from "@/features/integrations/TikTokConnection";
 import { ChatsPage } from "@/features/chats/ChatsPage";
+import { PipelinesPage } from "@/features/pipelines/PipelinesPage";
 import { SettingsPage } from "@/features/shell/SettingsPage";
 import { CrmPage, ContactsPage } from "@/features/crm/CrmPage";
 
@@ -75,6 +76,7 @@ export default function App() {
 
   if (!isAuthenticated) return <LoginScreen />;
   if (["/bandeja", "/whatsapp"].includes(window.location.pathname)) return <ChatsPage />;
+  if (window.location.pathname === "/embudos") return <PipelinesPage />;
   if (["/tools", "/crm"].includes(window.location.pathname)) return <CrmPage />;
   if (window.location.pathname === "/contactos") return <ContactsPage />;
   if (window.location.pathname === "/ajustes") return <SettingsPage />;

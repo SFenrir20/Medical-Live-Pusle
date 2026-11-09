@@ -24,12 +24,13 @@ TABLES = [m.TiktokAccount.__table__, m.Tiktoker.__table__, m.Live.__table__,
           MonitorState.__table__,
           chat.ChatChannel.__table__, chat.ChatConversation.__table__, chat.ChatMessage.__table__,
           chat.OptOut.__table__, automation.Flow.__table__, automation.FlowRun.__table__,
-          automation.FlowStep.__table__, automation.AiAgent.__table__,
+          automation.FlowStep.__table__, automation.AiAgent.__table__, automation.StudioSetting.__table__,
           automation.AiKnowledgeDoc.__table__, automation.AiUsage.__table__,
           automation.Broadcast.__table__, automation.BroadcastRecipient.__table__,
           automation.AutomationAudit.__table__, whatsapp.MirrorEvent.__table__, whatsapp.MirrorReceipt.__table__,
           crm.ChatNote.__table__, crm.ChatScheduled.__table__, crm.ChatConsent.__table__,
-          crm.QuickReply.__table__]
+          crm.QuickReply.__table__, crm.Pipeline.__table__, crm.PipelineStage.__table__,
+          crm.PipelineCard.__table__, crm.PipelineEvent.__table__]
 
 
 @pytest.fixture

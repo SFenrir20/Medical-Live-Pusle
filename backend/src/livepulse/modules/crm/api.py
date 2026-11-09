@@ -29,6 +29,7 @@ from ..social_live.models import CapturedPhone, PhoneRegistry
 from ..social_live.security import require_scope
 from ..whatsapp import api as wa_api
 from ..whatsapp import service as wa
+from . import funnels
 from .models import ChatConsent, ChatNote, ChatScheduled, QuickReply
 
 router = APIRouter(prefix='/api/crm', tags=['crm'])
@@ -225,6 +226,20 @@ async def detail(conversation_id: int, who=Depends(reader), session=Depends(get_
     return await detail_of(session, conversation, registry, who)
 
 
+async def set_stage(session, conversation, registry, who, stage: str) -> None:
+    """Change the stage of the contact (its own status for a LIVE contact) and log the move in the
+    built-in funnel. The caller already checked that this person may edit the conversation."""
+    before = stage_of(conversation, registry)
+    if registry:
+        await workflow.set_status(session, registry.id, who['user_id'], stage,
+                                  manager='contacts:assign_any' in perms(who))
+        await session.refresh(registry)
+    else:
+        conversation.stage = stage
+    await funnels.record_contact_stage(session, conversation.id, before,
+                                       stage_of(conversation, registry), who['user_id'])
+
+
 class ConversationPatch(BaseModel):
     stage: Literal['new', 'contacted', 'qualified', 'discarded'] | None = None
     result: str | None = Field(default=None, max_length=20)   # '' clears it
@@ -237,12 +252,7 @@ async def patch(conversation_id: int, body: ConversationPatch, who=Depends(reade
                 session=Depends(get_session)):
     conversation, registry = await writable(session, conversation_id, who)
     if body.stage is not None:
-        if registry:
-            await workflow.set_status(session, registry.id, who['user_id'], body.stage,
-                                      manager='contacts:assign_any' in perms(who))
-            await session.refresh(registry)
-        else:
-            conversation.stage = body.stage
+        await set_stage(session, conversation, registry, who, body.stage)
     if body.result is not None:
         if body.result and body.result not in RESULTS:
             raise HTTPException(422, 'Resultado no válido.')

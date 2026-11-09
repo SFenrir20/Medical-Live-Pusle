@@ -14,6 +14,7 @@ export function PrimaryNav({
   const links = [
     ["/", "Pulso"],
     ["/bandeja", "Bandeja"],
+    ...(user?.permissions.includes("wa:read") ? [["/embudos", "Embudos"]] : []),
     ["/contactos", "Contactos"],
     ...(tools ? [["/tools", "TOOLS"]] : []),
     ["/ajustes", "Ajustes"],

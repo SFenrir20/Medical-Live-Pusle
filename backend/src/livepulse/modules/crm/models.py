@@ -80,3 +80,62 @@ class QuickReply(Base):
     active = Column(Boolean, nullable=False, server_default=text('true'))
     created_by = Column(String(255))
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class Pipeline(Base):
+    """A funnel ("embudo"): an ordered list of stages that conversations move through. The one
+    with key 'contacts' is the built-in funnel and mirrors the contact's own status."""
+    __tablename__ = 'crm_pipelines'
+    id = Column(PK_BIG, primary_key=True, autoincrement=True)
+    key = Column(String(20), unique=True)                 # 'contacts' for the built-in funnel
+    name = Column(String(60), nullable=False)
+    position = Column(Integer, nullable=False, server_default='0')
+    archived = Column(Boolean, nullable=False, server_default=text('false'))
+    created_by = Column(String(255))
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class PipelineStage(Base):
+    __tablename__ = 'crm_pipeline_stages'
+    id = Column(PK_BIG, primary_key=True, autoincrement=True)
+    pipeline_id = Column(PK_BIG, ForeignKey('crm_pipelines.id'), nullable=False)
+    name = Column(String(60), nullable=False)
+    color = Column(String(7), nullable=False, server_default='#0f92ac')
+    description = Column(String(200))
+    position = Column(Integer, nullable=False, server_default='0')
+    # Built-in funnel only: the contact status this column stands for.
+    legacy_stage = Column(String(10))
+
+    __table_args__ = (Index('ix_crm_stage_pipeline', 'pipeline_id', 'position'),)
+
+
+class PipelineCard(Base):
+    """A conversation inside a funnel, with its (optional) potential value. In the built-in funnel
+    the stage comes from the contact, so `stage_id` stays empty and the row only holds the value."""
+    __tablename__ = 'crm_pipeline_cards'
+    id = Column(PK_BIG, primary_key=True, autoincrement=True)
+    pipeline_id = Column(PK_BIG, ForeignKey('crm_pipelines.id'), nullable=False)
+    conversation_id = Column(PK_BIG, ForeignKey('chat_conversations.id'), nullable=False)
+    stage_id = Column(PK_BIG, ForeignKey('crm_pipeline_stages.id'))
+    value_cents = Column(PK_BIG, nullable=False, server_default='0')
+    entered_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_by = Column(String(255))
+
+    __table_args__ = (
+        Index('ux_crm_card', 'pipeline_id', 'conversation_id', unique=True),
+        Index('ix_crm_card_stage', 'stage_id'),
+    )
+
+
+class PipelineEvent(Base):
+    """Every move of a conversation between stages: the source of the funnel numbers."""
+    __tablename__ = 'crm_pipeline_events'
+    id = Column(PK_BIG, primary_key=True, autoincrement=True)
+    pipeline_id = Column(PK_BIG, ForeignKey('crm_pipelines.id'), nullable=False)
+    conversation_id = Column(PK_BIG, ForeignKey('chat_conversations.id'), nullable=False)
+    from_stage_id = Column(PK_BIG)
+    to_stage_id = Column(PK_BIG, nullable=False)
+    actor_id = Column(String(255), nullable=False)
+    at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    __table_args__ = (Index('ix_crm_event_stage', 'pipeline_id', 'to_stage_id', 'conversation_id'),)

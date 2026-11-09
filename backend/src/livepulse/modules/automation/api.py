@@ -10,7 +10,7 @@ from datetime import datetime
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import delete, func, select
 
 from ...shared import crypto
@@ -33,6 +33,7 @@ from .models import (
     Flow,
     FlowRun,
     FlowStep,
+    StudioSetting,
 )
 
 router = APIRouter(prefix='/api/automation', tags=['automation'])
@@ -59,6 +60,115 @@ async def _get(session, model, row_id, what: str):
 
 
 # ---- overview and channels --------------------------------------------------------------
+
+
+class WidgetConfig(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    title: str = Field(default='Contáctanos', min_length=1, max_length=80)
+    subtitle: str = Field(default='¿Cuál es la mejor manera para contactarte?', max_length=160)
+    color: str = Field(default='#0f92ac', pattern=r'^#[0-9a-fA-F]{6}$')
+    text_color: str = Field(default='#ffffff', pattern=r'^#[0-9a-fA-F]{6}$')
+    position: Literal['left', 'right'] = 'right'
+    whatsapp: str = Field(default='', pattern=r'^(\+[1-9][0-9]{7,14})?$')
+    instagram: str = Field(default='', pattern=r'^[A-Za-z0-9._]{0,60}$')
+    messenger: str = Field(default='', pattern=r'^[A-Za-z0-9._-]{0,60}$')
+    whatsapp_enabled: bool = True
+    instagram_enabled: bool = False
+    messenger_enabled: bool = False
+
+
+@router.get('/studio/widget')
+async def get_widget(who=Depends(reader), session=Depends(get_session)):
+    row = await session.get(StudioSetting, 'widget')
+    return row.value if row else WidgetConfig().model_dump()
+
+
+@router.put('/studio/widget')
+async def save_widget(body: WidgetConfig, who=Depends(manager), session=Depends(get_session)):
+    row = await session.get(StudioSetting, 'widget')
+    if row is None:
+        row = StudioSetting(id='widget')
+        session.add(row)
+    row.value, row.updated_by, row.updated_at = body.model_dump(), who['user_id'], engine.utcnow()
+    audit(session, who, 'update', 'widget', 'widget')
+    await session.commit()
+    return row.value
+
+
+PRESET_TITLES = {'welcome': 'Mensaje de bienvenida', 'lead': 'Mensaje para leads',
+                 'appointment': 'Recordatorio de cita', 'followup': 'Seguimiento posterior'}
+
+
+class MessagePreset(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    key: Literal['welcome', 'lead', 'appointment', 'followup']
+    text: str = Field(min_length=1, max_length=500)
+    enabled: bool = True
+    delay_minutes: int = Field(default=0, ge=0, le=10080)
+
+    @model_validator(mode='after')
+    def nonblank(self):
+        if not self.text.strip():
+            raise ValueError('El mensaje no puede estar vacío.')
+        return self
+
+
+class PresetsIn(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    items: list[MessagePreset] = Field(min_length=4, max_length=4)
+
+    @model_validator(mode='after')
+    def unique_presets(self):
+        if {item.key for item in self.items} != set(PRESET_TITLES):
+            raise ValueError('Incluye una vez cada uno de los cuatro mensajes.')
+        return self
+
+
+@router.get('/studio/messages')
+async def get_presets(who=Depends(reader), session=Depends(get_session)):
+    row = await session.get(StudioSetting, 'messages')
+    return row.value if row else {'items': []}
+
+
+@router.put('/studio/messages')
+async def save_presets(body: PresetsIn, who=Depends(manager), session=Depends(get_session)):
+    from ..chat.service import ensure_simulator
+    channel = await ensure_simulator(session)
+    row = await session.get(StudioSetting, 'messages')
+    previous = {item['key']: item for item in (row.value.get('items', []) if row else [])}
+    saved = []
+    for item in body.items:
+        existing = previous.get(item.key, {}).get('flow_id')
+        flow = await session.get(Flow, existing) if existing else None
+        if flow is None:
+            flow = Flow(name=PRESET_TITLES[item.key], channel_id=channel.id,
+                        created_by=who['user_id'], graph={})
+            session.add(flow)
+        # Saving a preset never activates an automation on a real channel.
+        nodes = [{'id': 'inicio', 'type': 'trigger.message' if item.key == 'welcome'
+                  else 'trigger.manual', 'config': {'match': 'any'}, 'pos': {'x': 40, 'y': 100}}]
+        if item.enabled:
+            if item.delay_minutes:
+                nodes.append({'id': 'espera', 'type': 'action.wait',
+                              'config': {'minutes': item.delay_minutes}, 'pos': {'x': 300, 'y': 100}})
+            nodes.append({'id': 'mensaje', 'type': 'action.send_text', 'config': {'text': item.text},
+                          'pos': {'x': 560, 'y': 100}})
+        nodes.append({'id': 'fin', 'type': 'action.end', 'config': {}, 'pos': {'x': 820, 'y': 100}})
+        flow.graph = {'nodes': nodes, 'edges': [{'from': a['id'], 'to': b['id']}
+                      for a, b in zip(nodes, nodes[1:], strict=False)]}
+        flow.channel_id, flow.enabled = channel.id, False
+        flow.version = (flow.version or 0) + 1
+        flow.updated_at = engine.utcnow()
+        flow.description = 'MedicalBot: preset en simulador. No conectado a citas ni envíos reales.'
+        await session.flush()
+        saved.append({**item.model_dump(), 'flow_id': flow.id})
+    if row is None:
+        row = StudioSetting(id='messages')
+        session.add(row)
+    row.value, row.updated_by, row.updated_at = {'items': saved}, who['user_id'], engine.utcnow()
+    audit(session, who, 'update', 'message-presets', 'messages')
+    await session.commit()
+    return row.value
 
 def channel_item(channel: ChatChannel) -> dict:
     capabilities = CAPABILITIES[channel.kind]
