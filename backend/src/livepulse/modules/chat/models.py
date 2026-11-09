@@ -73,6 +73,7 @@ class ChatConversation(Base):
     __table_args__ = (
         UniqueConstraint('channel_id', 'phone', name='uq_chat_conversation_phone'),
         Index('ix_chat_conversations_last', 'last_message_at'),
+        Index('ix_chat_conversations_site', 'site_id'),
     )
 
 
