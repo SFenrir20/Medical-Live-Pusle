@@ -30,7 +30,8 @@ el panel de Clerk o su Backend API; el usuario no puede cambiarlo):
 
 | Código | Acceso |
 |---|---|
-| `agente_ventas` | Atención de contactos (ve los libres y los suyos) |
+| `agente_ventas` | Central de Citas: atiende contactos (ve los libres y los suyos) y agenda la cita |
+| `asesor` | Asesor de una sede: atiende a los pacientes que la Central agendó en su sede (ver `crm-omnicanal.md`) |
 | `gerente` | Marketing y reportes |
 | `jefe_marketing` | Marketing y reportes |
 | `supervisor` | Vista agente y Marketing |

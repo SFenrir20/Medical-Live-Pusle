@@ -1,5 +1,11 @@
 /** Business roles. Assigned in Clerk (Public metadata); the API verifies them in the session. */
-export type Role = "agente_ventas" | "gerente" | "jefe_marketing" | "supervisor" | "admin";
+export type Role =
+  | "agente_ventas"
+  | "asesor"
+  | "gerente"
+  | "jefe_marketing"
+  | "supervisor"
+  | "admin";
 export type ScreenName = "agent" | "marketing";
 
 export interface User {

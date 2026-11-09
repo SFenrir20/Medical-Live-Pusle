@@ -155,6 +155,11 @@ const Row = memo(function Row({
                 Sin responder · {ago(c.last?.at)}
               </span>
             )}
+            {c.site && (
+              <span className="rounded-full bg-indigo-50 px-2 py-0.5 text-[10px] font-semibold text-indigo-700">
+                {c.site}
+              </span>
+            )}
             <span className="truncate text-[10.5px] text-muted">
               {c.is_mine ? "Tuyo" : c.advisor_name ? c.advisor_name : "Sin asignar"}
             </span>

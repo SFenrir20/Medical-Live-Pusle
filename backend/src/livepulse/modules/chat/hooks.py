@@ -20,3 +20,22 @@ async def run_inbound(session, conversation, message) -> None:
                 await handler(session, conversation, message)
         except Exception:
             log.exception('Inbound handler %s failed', getattr(handler, '__name__', handler))
+
+
+_OUTBOUND: list[Handler] = []
+
+
+def register_outbound(handler: Handler) -> None:
+    if handler not in _OUTBOUND:
+        _OUTBOUND.append(handler)
+
+
+async def run_outbound(session, conversation, message) -> None:
+    """A message that really left (sent from the CRM or from the phone). A failing handler is
+    logged and skipped: it must never lose the message or stop the mirror."""
+    for handler in list(_OUTBOUND):
+        try:
+            async with session.begin_nested():
+                await handler(session, conversation, message)
+        except Exception:
+            log.exception('Outbound handler %s failed', getattr(handler, '__name__', handler))

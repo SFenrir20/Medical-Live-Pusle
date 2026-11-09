@@ -55,7 +55,7 @@ function AccessProblem({
 }
 
 export default function App() {
-  const { isAuthenticated, isLoading, error, reload, logout } = useAuth();
+  const { user, isAuthenticated, isLoading, error, reload, logout } = useAuth();
 
   if (isLoading) {
     return (
@@ -77,6 +77,7 @@ export default function App() {
   if (!isAuthenticated) return <LoginScreen />;
   if (["/bandeja", "/whatsapp"].includes(window.location.pathname)) return <ChatsPage />;
   if (window.location.pathname === "/embudos") return <PipelinesPage />;
+  if (user?.role === "asesor" && window.location.pathname === "/") return <PipelinesPage />;
   if (["/tools", "/crm"].includes(window.location.pathname)) return <CrmPage />;
   if (window.location.pathname === "/contactos") return <ContactsPage />;
   if (window.location.pathname === "/ajustes") return <SettingsPage />;

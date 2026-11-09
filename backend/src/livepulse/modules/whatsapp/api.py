@@ -26,6 +26,7 @@ from ...shared.db import get_session
 from ..analytics.models import MonitorState, UserRole
 from ..chat.models import ChatConversation, ChatMessage
 from ..chat.service import aware
+from ..crm.sites import site_ids_of, visible_to
 from ..identity.roles import permissions_of
 from ..social_live.contacts import claim
 from ..social_live.models import CapturedPhone, Live, PhoneRegistry
@@ -76,8 +77,12 @@ async def access(session, conversation_id, who, *, own=False):
     owner = registry.advisor_id if registry else conversation.advisor_id
     if own and owner != who['user_id']:
         raise HTTPException(409, 'Toma el contacto antes de responder. Si tiene otra asesora, debe reasignarlo un supervisor.')
-    if not own and owner not in (None, who['user_id']) and not can(who, 'wa:read_all'):
-        raise HTTPException(403, 'Esta conversación pertenece a otra asesora.')
+    if not own and not can(who, 'wa:read_all'):
+        in_my_site = conversation.site_id is not None and conversation.site_id in await site_ids_of(
+            session, who['user_id'])
+        free = owner is None and conversation.site_id is None
+        if owner != who['user_id'] and not free and not in_my_site:
+            raise HTTPException(403, 'Esta conversación pertenece a otra asesora u otra sede.')
     return conversation, registry
 
 
@@ -113,7 +118,7 @@ async def conversations(q: str = Query('', max_length=100), offset: int = Query(
         ChatConversation.channel_id == service.CHANNEL)
     owner = case((PhoneRegistry.id.is_not(None), PhoneRegistry.advisor_id), else_=ChatConversation.advisor_id)
     if not can(who, 'wa:read_all'):
-        query = query.where(or_(owner.is_(None), owner == who['user_id']))
+        query = query.where(visible_to(who['user_id'], owner))
     if q.strip():
         query = query.where(or_(ChatConversation.phone.contains(q.strip(), autoescape=True),
                                ChatConversation.contact_name.ilike('%' + q.replace('%', '').replace('_', '') + '%')))

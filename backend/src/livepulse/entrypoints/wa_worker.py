@@ -5,6 +5,7 @@ import time
 import traceback
 from pathlib import Path
 
+from ..modules.crm import autopipeline  # noqa: F401  registers the appointment rule
 from ..modules.crm.scheduled import tick as send_scheduled
 from ..modules.whatsapp.service import adopt_old_media, tick
 from ..shared.db import SessionLocal

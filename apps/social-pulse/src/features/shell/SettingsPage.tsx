@@ -1,3 +1,4 @@
+import { SitesSettings } from "@/features/sites/SitesSettings";
 import { useAuth } from "@/context/AuthContext";
 import { AppNav } from "./AppNav";
 
@@ -34,6 +35,7 @@ export function SettingsPage() {
             </div>
           </section>
         )}
+        {user?.permissions.includes("sites:manage") && <SitesSettings />}
       </main>
     </div>
   );

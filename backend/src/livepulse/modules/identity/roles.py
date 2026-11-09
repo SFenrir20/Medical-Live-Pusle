@@ -1,7 +1,7 @@
 """What each business role may do. The role itself is assigned in Clerk.
 
 Clerk user Public metadata (editable only from the Clerk dashboard/Backend API, never by the
-user):   {"livepulse": {"role": "agente_ventas" | "gerente" | "jefe_marketing" | "supervisor"}}
+user):   {"livepulse": {"role": "agente_ventas" | "asesor" | "gerente" | "jefe_marketing" | "supervisor"}}
 The role travels inside the signed session token, so it cannot be forged. A person without a
 valid role has no access. Edit PERMISSIONS to change what a role can do.
 """
@@ -25,6 +25,8 @@ WA_REVIEW = {'wa:read', 'wa:read_all'}
 PERMISSIONS: dict[str, set[str]] = {
     # Works own/unassigned contacts; never receives the capture (ingest) token.
     'agente_ventas': {'screen:agent', *CONTACT_WORK, *WA_WORK},
+    # Advisors of a branch: take over the patients the appointments centre booked for their branch.
+    'asesor': {'screen:agent', *CONTACT_WORK, *WA_WORK},
     'gerente': {*MARKETING, *WA_REVIEW},
     'jefe_marketing': {*MARKETING, *WA_REVIEW},
     # Both screens plus the operational view, to diagnose failures.
@@ -32,7 +34,7 @@ PERMISSIONS: dict[str, set[str]] = {
                    'crm:manage'},
     # Break-glass owner (ADMIN_USER_IDS) in case Clerk metadata is misconfigured.
     'admin': {'screen:agent', *MARKETING, 'monitor', *CONTACT_MANAGE, 'automation:manage', *WA_WORK, *WA_REVIEW, 'wa:manage',
-              'crm:manage'},
+              'crm:manage', 'sites:manage'},
 }
 
 
