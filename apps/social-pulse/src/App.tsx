@@ -1,11 +1,10 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { LogOut, ShieldAlert } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import { BrandLogo } from "@/features/auth/BrandLogo";
 import { LoginScreen } from "@/features/auth/LoginScreen";
 import { Dashboard } from "@/features/dashboard/Dashboard";
 import { TikTokConnection } from "@/features/integrations/TikTokConnection";
-import { ChatsPage } from "@/features/chats/ChatsPage";
 import { PipelinesPage } from "@/features/pipelines/PipelinesPage";
 import { SettingsPage } from "@/features/shell/SettingsPage";
 import { CrmPage, ContactsPage } from "@/features/crm/CrmPage";
@@ -56,6 +55,13 @@ function AccessProblem({
 
 export default function App() {
   const { user, isAuthenticated, isLoading, error, reload, logout } = useAuth();
+  const retiredInbox = /^\/(bandeja|whatsapp)\/?$/.test(window.location.pathname);
+
+  useEffect(() => {
+    if (retiredInbox) window.location.replace("/");
+  }, [retiredInbox]);
+
+  if (retiredInbox) return null;
 
   if (isLoading) {
     return (
@@ -75,7 +81,6 @@ export default function App() {
   }
 
   if (!isAuthenticated) return <LoginScreen />;
-  if (["/bandeja", "/whatsapp"].includes(window.location.pathname)) return <ChatsPage />;
   if (window.location.pathname === "/embudos") return <PipelinesPage />;
   if (user?.role === "asesor" && window.location.pathname === "/") return <PipelinesPage />;
   if (["/tools", "/crm"].includes(window.location.pathname)) return <CrmPage />;

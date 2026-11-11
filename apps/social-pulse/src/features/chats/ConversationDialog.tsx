@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ExternalLink, X } from "lucide-react";
+import { X } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import {
   chatApi,
@@ -202,13 +202,7 @@ export function ConversationDialog({
         aria-label="Conversación"
         className="relative flex h-[min(92dvh,52rem)] w-full max-w-6xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl"
       >
-        <div className="flex items-center justify-between border-b border-line bg-white px-4 py-2">
-          <a
-            href={`/bandeja?phone=${encodeURIComponent(detail?.phone ?? item?.phone ?? "")}`}
-            className="flex items-center gap-1.5 text-xs font-semibold text-primary hover:underline"
-          >
-            <ExternalLink size={13} /> Abrir en la bandeja
-          </a>
+        <div className="flex items-center justify-end border-b border-line bg-white px-4 py-2">
           <button
             type="button"
             onClick={onClose}
