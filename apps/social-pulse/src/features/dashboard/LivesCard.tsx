@@ -69,7 +69,7 @@ export function LivesCard({
             const [text, dot] = tone.split(" ");
             return (
               <a
-                href="/bandeja"
+                href="/embudos"
                 key={l.id}
                 className={`block p-5 transition hover:bg-white/15 ${index % 2 === 0 ? "bg-white/10" : ""}`}
               >

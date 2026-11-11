@@ -22,17 +22,15 @@ export function AppNav() {
   const onShift = user?.role === "agente_ventas" || user?.role === "asesor";
   const { presence, failed, setStatus } = usePresence(onShift);
   const path = window.location.pathname;
-  const active = ["/bandeja", "/whatsapp"].includes(path)
-    ? "Bandeja"
-    : path === "/embudos"
-      ? "Embudos"
-      : path === "/contactos"
-        ? "Contactos"
-        : ["/tools", "/crm"].includes(path)
-          ? "TOOLS"
-          : path === "/ajustes"
-            ? "Ajustes"
-            : "Pulso";
+  const active = path === "/embudos"
+    ? "Embudos"
+    : path === "/contactos"
+      ? "Contactos"
+      : ["/tools", "/crm"].includes(path)
+        ? "TOOLS"
+        : path === "/ajustes"
+          ? "Ajustes"
+          : "Pulso";
   return (
     <header className="z-30 border-b border-line bg-white">
       <div className="mx-auto flex min-h-16 flex-wrap py-2 max-w-[1800px] items-center justify-between gap-3 px-4 sm:px-6">

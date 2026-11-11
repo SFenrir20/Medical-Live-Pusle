@@ -31,7 +31,6 @@ export function SettingsPage() {
             <h2 className="font-bold">Conexiones</h2>
             <div className="mt-4 flex flex-wrap gap-4 text-sm text-primary">
               <a href="/integraciones/tiktok">Conexión de TikTok</a>
-              <a href="/bandeja">Conexión de WhatsApp</a>
             </div>
           </section>
         )}

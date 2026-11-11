@@ -13,7 +13,6 @@ export function PrimaryNav({
     user?.permissions.includes("automation:read");
   const links = [
     ["/", "Pulso"],
-    ["/bandeja", "Bandeja"],
     ...(user?.permissions.includes("wa:read") ? [["/embudos", "Embudos"]] : []),
     ["/contactos", "Contactos"],
     ...(tools ? [["/tools", "TOOLS"]] : []),

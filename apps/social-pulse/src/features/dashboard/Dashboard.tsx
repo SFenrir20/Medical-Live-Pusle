@@ -424,14 +424,6 @@ function MarketingDashboard({ initialView = "Resumen" }: { initialView?: Marketi
             >
               Conectar TikTok
             </a>
-            {user?.permissions.includes("wa:read") && (
-              <a
-                href="/bandeja"
-                className="rounded-xl px-3 py-2 text-xs font-semibold text-primary"
-              >
-                Bandeja
-              </a>
-            )}
             <span className="hidden rounded-full bg-violet-50 px-3 py-1.5 text-[11px] font-bold text-violet-700 sm:inline-flex">
               {ROLE_LABEL[user?.role ?? ""] ?? "Marketing"}
             </span>
@@ -496,19 +488,14 @@ function MarketingDashboard({ initialView = "Resumen" }: { initialView?: Marketi
               {item}
             </button>
           ))}
-          {(user?.permissions ?? []).includes("wa:read") &&
-            [
-              ["/bandeja", "Bandeja"],
-              ["/tools", "TOOLS"],
-            ].map(([href, text]) => (
-              <a
-                key={href}
-                href={href}
-                className="whitespace-nowrap rounded-xl border border-line bg-white px-4 py-2.5 text-sm font-semibold text-muted"
-              >
-                {text}
-              </a>
-            ))}
+          {(user?.permissions ?? []).includes("wa:read") && (
+            <a
+              href="/tools"
+              className="whitespace-nowrap rounded-xl border border-line bg-white px-4 py-2.5 text-sm font-semibold text-muted"
+            >
+              TOOLS
+            </a>
+          )}
         </div>
 
         <div className="mt-6 flex items-start gap-3 rounded-2xl border border-violet-200 bg-violet-50 p-5">
@@ -750,7 +737,7 @@ function MarketingDashboard({ initialView = "Resumen" }: { initialView?: Marketi
 function AgentDashboard({ onOpenMarketing }: { onOpenMarketing?: () => void }) {
   const { user, logout } = useAuth();
   const activeBoard = useActiveLives();
-  const [view, setView] = useState<View>("Pulso");
+  const [view] = useState<View>("Pulso");
   const [phoneOnly, setPhoneOnly] = useState(true);
   const workspace = useWorkspace(true, phoneOnly);
   const { messages, loading: inboxLoading, error: inboxError } = workspace;
@@ -789,21 +776,8 @@ function AgentDashboard({ onOpenMarketing }: { onOpenMarketing?: () => void }) {
   );
   const statsOf = (name: string) => board.summary?.agents.find((agent) => agent.name === name);
 
-  const goToView = (nextView: View) => {
-    if (nextView !== "Pulso") {
-      window.location.href = { Bandeja: "/bandeja", Contactos: "/contactos", Ajustes: "/ajustes" }[
-        nextView
-      ];
-      return;
-    }
-    setView(nextView);
-    setPage(1);
-    setSelectedId(null);
-  };
-
   const showPriority = () => {
-    window.location.href = "/bandeja";
-    setPage(1);
+    window.location.href = "/embudos";
   };
 
   const claimFollowUp = (id: number) => {
@@ -1057,15 +1031,6 @@ function AgentDashboard({ onOpenMarketing }: { onOpenMarketing?: () => void }) {
                   ) : (
                     <span className="text-slate-400">No detectado</span>
                   )}
-                  {item.phone && user?.permissions.includes("wa:read") && (
-                    <a
-                      href={`/whatsapp?phone=${encodeURIComponent(item.phone)}`}
-                      onClick={(event) => event.stopPropagation()}
-                      className="mt-2 block text-xs font-semibold text-primary"
-                    >
-                      Abrir WhatsApp
-                    </a>
-                  )}
                 </td>
                 <td className="px-4 py-4">
                   <TypeBadge type={item.type} />
@@ -1170,14 +1135,6 @@ function AgentDashboard({ onOpenMarketing }: { onOpenMarketing?: () => void }) {
             <PrimaryNav marketing={false} active={view} />
           </div>
           <div className="relative flex items-center gap-2">
-            {user?.permissions.includes("wa:read") && (
-              <a
-                href="/bandeja"
-                className="rounded-xl px-3 py-2 text-xs font-semibold text-primary"
-              >
-                Bandeja
-              </a>
-            )}
             {onShift && (
               <PresenceControl
                 presence={presence}
@@ -1395,7 +1352,6 @@ function AgentDashboard({ onOpenMarketing }: { onOpenMarketing?: () => void }) {
                   key={lead.id}
                   onClick={() => {
                     setSelectedId(lead.id);
-                    window.location.href = "/bandeja";
                   }}
                   className="rounded-2xl border border-line bg-white p-5 text-left transition hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-lg"
                 >
