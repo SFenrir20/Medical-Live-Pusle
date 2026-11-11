@@ -7,7 +7,6 @@ import {
   ConversationItem,
   Counts,
   CrmDetail,
-  LiveLead,
   problem,
   QuickReply,
   Scope,
@@ -21,7 +20,6 @@ import { ChatThread } from "./ChatThread";
 import { ContactPanel } from "./ContactPanel";
 import { ConversationList } from "./ConversationList";
 import { fullDate } from "./format";
-import { LivePanel } from "./LivePanel";
 import { pollVisible } from "./polling";
 
 const STATES: Record<string, string> = {
@@ -46,7 +44,7 @@ function keepUnchanged<T extends { id: number }>(old: T[], next: T[]): T[] {
   return merged.length === old.length && merged.every((x, i) => x === old[i]) ? old : merged;
 }
 
-/** Omnichannel inbox: conversations, chat, contact file (CRM) and the TikTok LIVE side. */
+/** Omnichannel inbox: conversations, chat and contact file (CRM). */
 export function ChatsPage() {
   const { user } = useAuth();
   const permissions = user?.permissions ?? [];
@@ -71,12 +69,10 @@ export function ChatsPage() {
   const [before, setBefore] = useState<number | null>(null);
   const [replies, setReplies] = useState<QuickReply[]>([]);
   const [team, setTeam] = useState<TeamMember[]>([]);
-  const [leads, setLeads] = useState<LiveLead[]>([]);
   const [busy, setBusy] = useState(false);
   const [opening, setOpening] = useState(false);
   const [error, setError] = useState("");
   const [ficha, setFicha] = useState(false);
-  const [liveOpen, setLiveOpen] = useState(false);
   const [scheduleSignal, setScheduleSignal] = useState(0);
   const request = useRef<{ id: string; text: string; conversation: number; file?: File } | null>(
     null,
@@ -232,22 +228,6 @@ export function ChatsPage() {
         .then(setTeam)
         .catch(() => undefined);
   }, [mayRead, mayAssign]);
-
-  useEffect(() => {
-    if (!mayRead) return;
-    let stopped = false;
-    const load = () =>
-      void chatApi
-        .liveLeads()
-        .then((l) => !stopped && setLeads(l))
-        .catch(() => undefined);
-    load();
-    const timer = window.setInterval(load, 15000);
-    return () => {
-      stopped = true;
-      window.clearInterval(timer);
-    };
-  }, [mayRead]);
 
   const act = async (work: () => Promise<CrmDetail | void>): Promise<boolean> => {
     setBusy(true);
@@ -409,13 +389,6 @@ export function ChatsPage() {
               Vincular / reconectar
             </button>
           )}
-          <button
-            type="button"
-            onClick={() => setLiveOpen(true)}
-            className="ml-auto rounded-xl border border-line bg-white px-3 py-1.5 text-xs text-primary min-[68.75rem]:hidden"
-          >
-            TikTok LIVE
-          </button>
           {statusOpen && (
             <div
               role="status"
@@ -467,7 +440,7 @@ export function ChatsPage() {
         )}
       </div>
 
-      <main className="mx-3 my-4 grid min-h-0 flex-1 grid-cols-1 overflow-hidden rounded-[24px] border border-line bg-white shadow-sm sm:mx-6 md:grid-cols-[320px_minmax(0,1fr)] min-[68.75rem]:grid-cols-[320px_minmax(320px,1fr)_220px_230px] 2xl:grid-cols-[360px_minmax(0,1fr)_260px_270px]">
+      <main className="mx-3 my-4 grid min-h-0 flex-1 grid-cols-1 overflow-hidden rounded-[24px] border border-line bg-white shadow-sm sm:mx-6 md:grid-cols-[320px_minmax(0,1fr)] min-[68.75rem]:grid-cols-[320px_minmax(0,1fr)_220px] 2xl:grid-cols-[360px_minmax(0,1fr)_260px]">
         <div
           className={`min-h-0 overflow-hidden md:flex ${selected ? "hidden" : "flex"} [&>aside]:w-full`}
         >
@@ -552,30 +525,8 @@ export function ChatsPage() {
         <div className="hidden min-h-0 overflow-hidden min-[68.75rem]:flex [&>aside]:w-full">
           {panel}
         </div>
-        <div className="hidden min-h-0 overflow-hidden min-[68.75rem]:flex [&>aside]:w-full">
-          <LivePanel leads={leads} onOpen={(phone) => void openPhone(phone)} opening={opening} />
-        </div>
       </main>
 
-      {liveOpen && (
-        <div className="fixed inset-0 z-40 flex flex-col bg-white min-[68.75rem]:hidden">
-          <button
-            type="button"
-            onClick={() => setLiveOpen(false)}
-            className="border-b border-line p-4 text-right text-primary"
-          >
-            Cerrar TikTok LIVE
-          </button>
-          <LivePanel
-            leads={leads}
-            onOpen={(phone) => {
-              setLiveOpen(false);
-              void openPhone(phone);
-            }}
-            opening={opening}
-          />
-        </div>
-      )}
       {ficha && (
         <div className="fixed inset-0 z-40 flex flex-col bg-white min-[68.75rem]:hidden">
           <div className="flex items-center justify-between border-b border-line p-3">
