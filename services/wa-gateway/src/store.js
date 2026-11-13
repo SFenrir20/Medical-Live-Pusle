@@ -49,7 +49,12 @@ export class Store {
   pendingCount() { return this.db.prepare('SELECT count(*) AS n FROM pending').get().n; }
   eventCount() { return this.db.prepare('SELECT count(*) AS n FROM events').get().n; }
   resetAuth() { this.db.exec('DELETE FROM auth'); }
-  registered() { return !!this.get('creds', 'auth')?.registered; }
+  registered() {
+    const creds = this.get('creds', 'auth');
+    // QR pairing in Baileys stores me.id but can leave registered=false.
+    // Its login handshake uses me, so the legacy flag alone skips valid sessions on restart.
+    return !!(creds?.me?.id || creds?.registered);
+  }
   close() {
     this.db.close();
   }

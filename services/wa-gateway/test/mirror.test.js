@@ -47,6 +47,43 @@ test('Signal auth, queued events survive restart, stay encrypted and reject a wr
   } finally { rmSync(directory, { recursive: true, force: true }); }
 });
 
+test('QR credentials survive restart and trigger automatic connection even with registered false', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'medical-wa-qr-restart-'));
+  const path = join(directory, 'store.sqlite');
+  let store, mirror;
+  try {
+    store = new Store(path, key);
+    assert.equal(store.registered(), false);
+    const auth = store.auth();
+    // Baileys QR pairing populates me without setting the legacy registered flag.
+    assert.equal(auth.state.creds.registered, false);
+    auth.state.creds.me = { id: business.slice(1) + ':4@s.whatsapp.net' };
+    auth.save();
+    store.set('account', business);
+    store.close();
+    store = new Store(path, key);
+    let connections = 0;
+    const socket = { ev: new EventEmitter(), user: auth.state.creds.me };
+    mirror = new Mirror(store, undefined, options => {
+      connections++;
+      assert.equal(options.auth.creds.me.id, auth.state.creds.me.id);
+      return socket;
+    });
+    // Same startup gate as server.js; no manual connect request or second QR.
+    if (store.registered()) mirror.connect();
+    assert.equal(connections, 1);
+    socket.ev.emit('connection.update', { connection: 'open' });
+    await mirror.eventsTail;
+    assert.equal(mirror.state, 'connected');
+    assert.equal(mirror.qr, null);
+    store.resetAuth();
+    assert.equal(store.registered(), false); // Saved account alone cannot authenticate.
+  } finally {
+    mirror?.stop(); store?.close();
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test('same request submits only once, including concurrent retries', async t => {
   const { mirror, store } = setup(t); let calls = 0;
   mirror.socket.sendMessage = async (jid, content, options) => {
