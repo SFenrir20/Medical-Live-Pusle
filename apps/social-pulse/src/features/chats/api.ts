@@ -126,6 +126,7 @@ export type WaStatus = {
   reconnect_attempt?: number;
   pending_events?: number;
   recovery_reason?: string | null;
+  history_received_at?: string | null;
 };
 
 export type QuickReply = {
@@ -166,6 +167,14 @@ const call = async <T>(method: "post" | "put" | "patch" | "delete", url: string,
 export const chatApi = {
   status: (signal?: AbortSignal) => get<WaStatus>("/whatsapp/status", undefined, signal),
   connect: () => call<WaStatus>("post", "/whatsapp/connect"),
+  recoverHistory: async (id: number, restart = false) =>
+    (
+      await apiClient.post<{ state: string }>(
+        `/whatsapp/conversations/${id}/history`,
+        { restart },
+        { timeout: 25000 },
+      )
+    ).data,
   openPhone: (phone: string) => call<{ id: number }>("post", "/whatsapp/conversations", { phone }),
   claim: (id: number) => call("post", `/whatsapp/conversations/${id}/claim`),
   seen: (id: number) => call("post", `/whatsapp/conversations/${id}/seen`),

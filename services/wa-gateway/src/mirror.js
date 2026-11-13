@@ -38,7 +38,8 @@ export class Mirror {
     return { state: this.state, phone: this.expectedPhone, qr: this.qr,
       unresolved: this.store.pendingCount(), connected_at: this.connectedAt,
       retry_at: this.nextRetryAt, reconnect_attempt: this.attempt,
-      last_disconnect_code: this.lastDisconnectCode, recovery_reason: this.recoveryReason };
+      last_disconnect_code: this.lastDisconnectCode, recovery_reason: this.recoveryReason,
+      history_received_at: this.store.get('history_received_at') };
   }
   // Never infer a dead connection from a quiet inbox. Baileys owns protocol heartbeats;
   // this watchdog only recovers an expired handshake or a visibly closed transport.
@@ -117,7 +118,7 @@ export class Mirror {
     let socket;
     try { socket = this.socketFactory({ auth: auth.state, logger: pino({ level: 'silent' }),
       browser: ['Medical Social Pulse', 'Chrome', '1.0.0'], markOnlineOnConnect: false,
-      syncFullHistory: false, shouldSyncHistoryMessage: () => false,
+      syncFullHistory: true, shouldSyncHistoryMessage: () => true,
       getMessage: async key => this.store.get(`message:${key.id}`),
       connectTimeoutMs: 30_000, defaultQueryTimeoutMs: 30_000, keepAliveIntervalMs: 25_000,
     }); } catch {
@@ -153,6 +154,10 @@ export class Mirror {
     socket.ev.on('messages.upsert', this.handler(async ({ messages }) => {
       for (const message of messages) await this.message(message);
     }, socket));
+    socket.ev.on('messaging-history.set', this.handler(async ({ messages = [] }) => {
+      for (const message of messages) await this.message(message, true);
+      this.store.set('history_received_at', new Date(this.now()).toISOString());
+    }, socket));
     socket.ev.on('lid-mapping.update', this.handler(() => this.retryPending(), socket));
     socket.ev.on('messages.update', this.handler(async updates => {
       for (const { key, update } of updates) {
@@ -176,19 +181,45 @@ export class Mirror {
   }
   async retryPending() {
     for (const pending of this.store.pending()) {
-      if (pending.type === 'message') await this.message(pending.message);
+      if (pending.type === 'message') await this.message(pending.message, pending.historical === true);
       else await this.receipt(pending.key, pending.status, pending.at, pending.clock);
     }
   }
-  async message(message) {
+  async requestHistory({ phone, external_id, from_me, at, restart = false }) {
+    if (!/^\+[1-9]\d{7,14}$/.test(phone || '') || typeof external_id !== 'string' ||
+      !external_id || external_id.length > 128 || typeof from_me !== 'boolean' ||
+      !Number.isSafeInteger(at) || at <= 0 || typeof restart !== 'boolean') throw new Error('invalid_history_request');
+    if (this.state !== 'connected' || !this.matchesAccount()) return { state: 'offline' };
+    const name = `history:${phone}`;
+    const previous = this.store.get(name);
+    // Reserve before awaiting the network: repeated clicks cannot issue overlapping requests.
+    if (previous && this.now() - previous.requested_at < 60_000) return { state: 'waiting' };
+    const seed = this.store.get(`message-meta:${external_id}`);
+    const cursor = !restart && previous?.cursor ? previous.cursor :
+      seed?.phone === phone ? seed : { phone, key: { id: external_id, fromMe: from_me,
+        remoteJid: phone.slice(1) + '@s.whatsapp.net' }, at };
+    this.store.set(name, { cursor, requested_at: this.now() });
+    let timer;
+    try {
+      await Promise.race([
+        this.socket.fetchMessageHistory(50, cursor.key, cursor.at),
+        new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('history_timeout')), 15_000); }),
+      ]);
+      return { state: 'requested' }; // Acceptance does not mean the phone delivered any history.
+    } catch {
+      return { state: 'unconfirmed' }; // Keep cooldown: a late response may still arrive.
+    } finally { clearTimeout(timer); }
+  }
+  async message(message, historical = false) {
     if (!this.matchesAccount()) return;
     const { key } = message;
     if (!key.id || !message.message) return;
     const content = normalizeMessageContent(message.message), type = getContentType(content);
     if (!type || ['protocolMessage', 'senderKeyDistributionMessage', 'reactionMessage'].includes(type)) return;
+    if (historical && !timestamp(message.messageTimestamp)) return; // Never date old messages as today.
     const phone = await this.resolve(key);
     if (!phone) {
-      if (key.remoteJid?.endsWith('@lid')) this.store.set(`m:${key.id}`, { type: 'message', message }, 'pending');
+      if (key.remoteJid?.endsWith('@lid')) this.store.set(`m:${key.id}`, { type: 'message', message, historical }, 'pending');
       return;
     }
     const at = timestamp(message.messageTimestamp) || new Date().toISOString();
@@ -210,16 +241,22 @@ export class Mirror {
     this.store.transaction(() => {
       this.store.set(`m:${key.id}`, null, 'pending');
       this.store.set(`message:${key.id}`, message.message);
+      const meta = { phone, key, at: Math.floor(new Date(at).getTime() / 1000) };
+      this.store.set(`message-meta:${key.id}`, meta);
+      const request = historical && this.store.get(`history:${phone}`);
+      if (request && meta.at < request.cursor.at) {
+        this.store.set(`history:${phone}`, { ...request, cursor: meta });
+      }
       this.store.event({ type: 'message', external_id: key.id, phone,
         body: media_id ? (caption || '[Imagen]') : info ? info.caption.slice(0, 20000) : body.slice(0, 20000),
-        from_me: !!key.fromMe, request_id: intent?.request_id || null, at,
+        from_me: !!key.fromMe, request_id: intent?.request_id || null, at, historical,
         name: key.fromMe ? null : message.pushName, media_type: type, media_id: media_id || file_id,
         media_kind: media_id ? 'image' : info?.kind ?? null, media_seconds: info?.seconds ?? null,
         media_name: info?.name ?? null, media_size: info?.size ?? null });
       if (intent) this.store.set(`request:${intent.request_id}`, { ...intent, state: 'sent', at });
     });
-    if (media_id) void this.image(media_id).catch(() => {}); // Retry on view if temporarily unavailable.
-    if (file_id && KINDS[info.kind].eager) void this.media(file_id).catch(() => {});
+    if (media_id && !historical) void this.image(media_id).catch(() => {}); // Historical media downloads on view.
+    if (file_id && !historical && KINDS[info.kind].eager) void this.media(file_id).catch(() => {});
   }
   media(id) {
     if (!this.mediaDownloads.has(id)) {

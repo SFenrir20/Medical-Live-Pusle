@@ -81,6 +81,67 @@ async def test_mirror_deduplicates_messages_without_triggering_automation(env, p
         assert await session.scalar(select(func.count()).select_from(ChatMessage)) == 1
 
 
+async def test_history_is_chronological_deduplicated_and_does_not_run_rules(env, people, monkeypatch):
+    client, factory = env
+    calls = []
+
+    async def outbound(*args):
+        calls.append(args[-1].external_id)
+
+    monkeypatch.setattr(service.hooks, 'run_outbound', outbound)
+    await ingest(factory, event(external_id='recent', at=(T0 + timedelta(days=1)).isoformat(),
+                                from_me=True, body='Latest reply'))
+    calls.clear()
+    old = event(external_id='older', historical=True, from_me=True, body='Old appointment')
+    await ingest(factory, old)
+    await ingest(factory, {**old, 'id': str(uuid4()), 'historical': False})  # replay as an upsert
+    await ingest(factory, event('receipt', external_id='older', status='read'))
+    await ingest(factory, event(external_id='old-in', historical=True,
+                                at=(T0 - timedelta(days=1)).isoformat()))
+    assert calls == []
+    async with factory() as session:
+        conv = await session.scalar(select(ChatConversation))
+        cid = conv.id
+        assert conv.unread == 0
+        assert await session.scalar(select(func.count()).select_from(ChatMessage)) == 3
+    result = await client.get(f'{BASE}/conversations/{cid}', headers=auth())
+    messages = result.json()['messages']
+    assert [m['body'] for m in messages] == ['Hola', 'Old appointment', 'Latest reply']
+    page = await client.get(f'{BASE}/conversations/{cid}?before={messages[1]["id"]}', headers=auth())
+    assert [m['body'] for m in page.json()['messages']] == ['Hola']
+    # The last preview must not be the most recently INSERTED historical message.
+    from livepulse.modules.crm.api import build_items, last_direction
+    async with factory() as session:
+        conv = await session.get(ChatConversation, cid)
+        items = await build_items(session, [(conv, None)], {'user_id': 'ana'})
+        assert items[0]['last']['body'] == 'Latest reply'
+        assert items[0]['waiting'] is False
+        assert await session.scalar(select(last_direction()).select_from(ChatConversation)) == 'out'
+
+
+async def test_history_requests_require_access_and_use_latest_provider_message(env, people, monkeypatch):
+    client, factory = env
+    await ingest(factory, event(external_id='new', at=(T0 + timedelta(days=1)).isoformat()))
+    await ingest(factory, event(external_id='old', historical=True))
+    cid = await open_chat(client)
+    await claim_chat(client, cid)
+    calls = []
+
+    async def gateway_call(path, data=None):
+        calls.append((path, data))
+        return {'state': 'requested'}
+
+    monkeypatch.setattr(gateway, 'call', gateway_call)
+    url = f'{BASE}/conversations/{cid}/history'
+    assert (await client.post(url, headers=auth('bea'), json={})).status_code == 403
+    assert (await client.post(url, headers=auth('jefa'), json={})).status_code == 403
+    assert calls == []
+    result = await client.post(url, headers=auth(), json={'restart': True})
+    assert result.status_code == 202, result.text
+    assert calls == [('/history', {'phone': PHONE, 'external_id': 'new', 'from_me': False,
+                                  'at': int((T0 + timedelta(days=1)).timestamp()), 'restart': True})]
+
+
 async def test_claim_permissions_and_idempotent_outbox(env, people):
     client, factory = env
     conversation = await open_chat(client)

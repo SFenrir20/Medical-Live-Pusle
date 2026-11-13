@@ -107,13 +107,13 @@ async def build_items(session, rows, who) -> list[dict]:
     last: dict[int, ChatMessage] = {}
     consent, opted, lives = {}, set(), {}
     if ids:
-        latest = dict((await session.execute(
-            select(ChatMessage.conversation_id, func.max(ChatMessage.id)).where(
-                ChatMessage.conversation_id.in_(ids)).group_by(ChatMessage.conversation_id))).all())
-        if latest:
-            found = {m.id: m for m in (await session.scalars(select(ChatMessage).where(
-                ChatMessage.id.in_(list(latest.values()))))).all()}
-            last = {cid: found.get(mid) for cid, mid in latest.items()}
+        ranked = select(ChatMessage.id, func.row_number().over(
+            partition_by=ChatMessage.conversation_id,
+            order_by=(ChatMessage.created_at.desc(), ChatMessage.id.desc())).label('position')).where(
+                ChatMessage.conversation_id.in_(ids)).subquery()
+        found = (await session.scalars(select(ChatMessage).join(
+            ranked, ranked.c.id == ChatMessage.id).where(ranked.c.position == 1))).all()
+        last = {m.conversation_id: m for m in found}
         consent = {c.phone: c.status for c in (await session.scalars(select(ChatConsent).where(
             ChatConsent.phone.in_(phones)))).all()}
         opted = set((await session.scalars(select(OptOut.phone).where(
@@ -155,7 +155,8 @@ SCOPES = ('all', 'mine', 'unread', 'waiting', 'unassigned', 'archived')
 def last_direction():
     """Direction of the newest message: 'in' means the person is waiting for an answer."""
     return (select(ChatMessage.direction).where(ChatMessage.conversation_id == ChatConversation.id)
-            .order_by(ChatMessage.id.desc()).limit(1).correlate(ChatConversation).scalar_subquery())
+            .order_by(ChatMessage.created_at.desc(), ChatMessage.id.desc())
+            .limit(1).correlate(ChatConversation).scalar_subquery())
 
 
 def in_scope(query, scope: str, me: str):

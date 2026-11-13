@@ -1,5 +1,6 @@
 import { ImagePreview } from "./ChatImage";
 import { MessageMedia } from "./ChatMedia";
+import { HistoryRecovery } from "./HistoryRecovery";
 import {
   FormEvent,
   Fragment,
@@ -438,6 +439,7 @@ export function ChatThread({
 
       {actionsOpen && (
         <div className="flex flex-wrap items-center gap-2 border-b border-line px-4 py-2.5">
+          <HistoryRecovery key={head.id} id={head.id} connected={status.state === "connected"} />
           <select
             aria-label="Etapa del contacto"
             value={head.stage}

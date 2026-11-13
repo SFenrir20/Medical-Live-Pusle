@@ -19,7 +19,7 @@ from fastapi import (
 )
 from PIL import Image, UnidentifiedImageError
 from pydantic import BaseModel, Field
-from sqlalchemy import case, func, or_, select, update
+from sqlalchemy import and_, case, func, or_, select, update
 from sqlalchemy.orm import aliased
 
 from ...shared.db import get_session
@@ -157,14 +157,45 @@ async def take(conversation_id: int, who=Depends(sender), session=Depends(get_se
     return item(conversation, registry)
 
 
+class HistoryRequest(BaseModel):
+    restart: bool = False
+
+
+@router.post('/conversations/{conversation_id}/history', status_code=202)
+async def recover_history(conversation_id: int, body: HistoryRequest,
+                          who=Depends(reader), session=Depends(get_session)):
+    conversation, _ = await access(session, conversation_id, who)
+    if not (can(who, 'wa:manage') or can(who, 'wa:send')):
+        raise HTTPException(403, 'No tienes permiso para solicitar historial.')
+    anchor = await session.scalar(select(ChatMessage).where(
+        ChatMessage.conversation_id == conversation.id, ChatMessage.external_id.is_not(None))
+        .order_by(ChatMessage.created_at.desc(), ChatMessage.id.desc()).limit(1))
+    if not anchor:
+        raise HTTPException(409, 'Se necesita al menos un mensaje de WhatsApp en este chat para pedir anteriores.')
+    try:
+        result = await gateway.call('/history', {'phone': conversation.phone, 'external_id': anchor.external_id,
+            'from_me': anchor.direction == 'out', 'at': int(aware(anchor.created_at).timestamp()),
+            'restart': body.restart})
+    except gateway.GatewayUnavailable as exc:
+        raise HTTPException(503, str(exc)) from exc
+    if result.get('state') == 'offline':
+        raise HTTPException(409, 'WhatsApp debe estar conectado para solicitar historial.')
+    return result
+
+
 @router.get('/conversations/{conversation_id}')
 async def detail(conversation_id: int, before: int | None = Query(None, gt=0),
                  who=Depends(reader), session=Depends(get_session)):
     conversation, registry = await access(session, conversation_id, who)
     query = select(ChatMessage).where(ChatMessage.conversation_id == conversation.id)
     if before:
-        query = query.where(ChatMessage.id < before)
-    messages = list((await session.scalars(query.order_by(ChatMessage.id.desc()).limit(101))).all())
+        cursor = await session.get(ChatMessage, before)
+        if not cursor or cursor.conversation_id != conversation.id:
+            raise HTTPException(400, 'El cursor no pertenece a esta conversación.')
+        query = query.where(or_(ChatMessage.created_at < cursor.created_at,
+                               and_(ChatMessage.created_at == cursor.created_at, ChatMessage.id < before)))
+    messages = list((await session.scalars(query.order_by(
+        ChatMessage.created_at.desc(), ChatMessage.id.desc()).limit(101))).all())
     names = dict((await session.execute(select(UserRole.user_id, UserRole.display_name).where(
         UserRole.user_id.in_([m.author_id for m in messages if m.author_id])))).all())
     first_id = select(ChatMessage.id).where(
