@@ -100,6 +100,7 @@ class ChatMessage(Base):
     delivered_at = Column(DateTime(timezone=True))
     read_at = Column(DateTime(timezone=True))
     observed_at = Column(DateTime(timezone=True))
+    historical = Column(Boolean, nullable=False, server_default=text('false'))
     flow_run_id = Column(PK_BIG)
     broadcast_id = Column(PK_BIG)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())

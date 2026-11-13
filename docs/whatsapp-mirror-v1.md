@@ -1,7 +1,7 @@
 # WhatsApp mirror V1 — operación
 
 Implementación local: conector Node/Baileys, worker persistente, API con permisos Clerk y pantalla
-`/whatsapp`. **La prueba real requiere desplegar y vincular el teléfono; las pruebas automáticas
+chats de **Embudos**. **La prueba real requiere desplegar y vincular el teléfono; las pruebas automáticas
 usan un transporte simulado y no demuestran conectividad con una cuenta real.**
 
 ## Alcance actual
@@ -18,8 +18,9 @@ usan un transporte simulado y no demuestran conectividad con una cuenta real.**
   el remitente, y el API lo vuelve a validar. Enviar audio, video o documentos desde el CRM aún no existe
   (solo texto e imágenes). Los archivos de una sola visualización siguen en el teléfono.
   Ver `crm-omnicanal.md`, migración 0018.
-- No se importa el historial completo anterior a la vinculación. No es una copia de seguridad
-  del WhatsApp ni una garantía de recuperar mensajes de períodos sin conexión.
+- Se importa el historial individual que WhatsApp entrega al conector, con fechas originales y
+  deduplicación por mensaje. También se pueden solicitar lotes anteriores por chat sin desvincular.
+  No es una copia de seguridad ni una garantía de recuperar todo un período sin conexión.
 - Contacto común por número E.164, incluso si WhatsApp llegó antes de la captura TikTok. Las
   apariciones en distintas cuentas/LIVE permanecen separadas dentro del historial del contacto.
 - Roles: ventas ve sus conversaciones y las libres; debe tomar un contacto antes de enviar.
@@ -161,8 +162,8 @@ persistidos para reconciliación. Conservar el volumen y la clave al recrear el 
 La bandeja consulta de nuevo al recuperar internet, enfocar la ventana o volver a una pestaña
 visible. No solapa consultas del mismo ciclo y cancela las del contexto anterior al cambiar
 filtros o conversación. Las respuestas antiguas no reemplazan la lista del filtro actual.
-Estas mejoras no importan historial previo ni garantizan recuperar todos los mensajes de una
-desconexión. No sustituyen la prueba real de reinicio y caída de red con el número vinculado.
+La reconexión por sí sola no garantiza recuperar todos los mensajes de una desconexión. La
+recuperación de historial se describe abajo; requiere prueba real con el número vinculado.
 
 - `Conector no disponible`: comprobar variables y servicio `wa-gateway`.
 - Conectado pero sincronización atrasada: comprobar `wa-worker`, migración y acceso a PostgreSQL.
@@ -225,6 +226,34 @@ Las credenciales Signal, eventos pendientes y registros de envío del gateway se
 con AES-256-GCM. El volumen SQLite no se cifra como dispositivo completo. Los mensajes del CRM
 se guardan en PostgreSQL, bajo la misma protección y respaldos que el resto del CRM. Esta V1 no
 purga chats automáticamente; la retención de comentarios TikTok no borra mensajes WhatsApp.
+
+## Recuperar mensajes anteriores (migración 0022)
+
+Desplegar API/worker con la migración `0022`, `wa-gateway` y `web`. Conservar `wa-session` y
+`WA_SESSION_KEY`. El gateway acepta `messaging-history.set` y solicita historial en la configuración
+de Baileys; WhatsApp decide qué lotes ofrece y puede no volver a enviar historial tras una reconexión.
+
+Para una cuenta ya vinculada, abrir un chat desde **Embudos**, desplegar el menú de tres puntos y
+pulsar **Recuperar historial**. Se pide al teléfono hasta 50 mensajes anteriores por solicitud:
+
+- La primera petición parte del mensaje de WhatsApp más reciente guardado para ese chat, para
+  buscar huecos antes de los mensajes nuevos. Se necesita al menos uno como referencia.
+- Las siguientes peticiones continúan desde el mensaje más antiguo recibido en los lotes solicitados.
+  El cursor se guarda cifrado y sobrevive a reinicios. Hay una espera mínima de 60 segundos por chat.
+- **Buscar de nuevo desde recientes** reinicia ese cursor para buscar un hueco más reciente.
+- Una solicitud aceptada no significa importación terminada. Mantener el teléfono disponible;
+  si no llega un lote, no se anuncia el historial como completo ni se inventan mensajes.
+- La respuesta se procesa por la misma cola persistente y el worker. Se evitan duplicados, se
+  conservan las fechas originales y se pagina por fecha/id, no por orden de llegada al servidor.
+- Los mensajes importados no incrementan los no leídos ni ejecutan reglas de citas, reasignaciones
+  o marcas de contactado; la marca persistente también protege frente a recibos y reenvíos posteriores.
+- Los adjuntos históricos se intentan descargar al abrirlos. Pueden haber caducado en WhatsApp.
+  Grupos/estados/canales y contenido de una sola visualización no se incorporan como adjuntos normales.
+- Solo usuarios con acceso al chat y permiso `wa:send` o `wa:manage` pueden solicitar los lotes.
+
+En Ajustes, **Última comprobación del servicio** es el heartbeat del worker, no prueba de historial
+completo. **Último lote de historial recibido** indica recepción en el gateway; aún puede quedar
+trabajo pendiente de importar en PostgreSQL.
 
 ## Comprobaciones de desarrollo
 

@@ -87,7 +87,18 @@ export function WhatsAppConnection() {
         </p>
       )}
       {status?.sync_at && (
-        <p className="mt-2 text-xs text-muted">Última sincronización: {fullDate(status.sync_at)}</p>
+        <p className="mt-2 text-xs text-muted">
+          Última comprobación del servicio: {fullDate(status.sync_at)}
+        </p>
+      )}
+      <p className="mt-2 text-xs text-muted">
+        Esta comprobación no confirma que todo el historial esté importado. Para buscar mensajes
+        faltantes, abre el chat y selecciona «Recuperar historial» en su menú.
+      </p>
+      {status?.history_received_at && (
+        <p className="mt-2 text-xs text-muted">
+          Último lote de historial recibido: {fullDate(status.history_received_at)}
+        </p>
       )}
       {status?.state === "unavailable" && (
         <p className="mt-3 text-sm text-amber-800">

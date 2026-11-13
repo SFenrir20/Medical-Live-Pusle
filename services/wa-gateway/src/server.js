@@ -50,6 +50,7 @@ const server = createServer(async (req, res) => {
       return reply(200, { restored: store.retryRejected(data.sequences) });
     }
     if (req.method === 'POST' && req.url === '/connect') { mirror.connect(); return reply(200, mirror.status()); }
+    if (req.method === 'POST' && req.url === '/history') return reply(200, await mirror.requestHistory(data));
     if (req.method === 'POST' && req.url === '/events/ack' && Array.isArray(data.sequences) &&
       data.sequences.length <= 100 && data.sequences.every(Number.isSafeInteger)) {
       store.ack(data.sequences); return reply(200, { ok: true });

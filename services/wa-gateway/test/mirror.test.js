@@ -235,6 +235,65 @@ function lifecycle(t, factory) {
   return { mirror, store, sockets, advance: ms => { clock += ms; } };
 }
 
+test('history batches preserve dates and direction, exclude groups and retain the historical flag for LIDs', async t => {
+  const { mirror, store, sockets } = lifecycle(t);
+  mirror.connect();
+  const socket = sockets[0];
+  socket.signalRepository = { lidMapping: { getPNForLID: async () => null } };
+  socket.ev.emit('connection.update', { connection: 'open' });
+  await mirror.eventsTail;
+  const msg = (id, remoteJid, fromMe = false) => ({ key: { id, remoteJid, fromMe },
+    message: { conversation: id }, messageTimestamp: 1_790_000_000 });
+  socket.ev.emit('messaging-history.set', { messages: [
+    msg('incoming-old', contact.slice(1) + '@s.whatsapp.net'),
+    msg('outgoing-old', contact.slice(1) + '@s.whatsapp.net', true),
+    msg('group', '123@g.us'), msg('pending-lid', '123@lid'),
+    { ...msg('missing-date', contact.slice(1) + '@s.whatsapp.net'), messageTimestamp: undefined },
+  ] });
+  await mirror.eventsTail;
+  assert.equal(store.events().length, 2);
+  assert.ok(store.events().every(e => e.historical && e.at === new Date(1_790_000_000_000).toISOString()));
+  assert.equal(store.events()[1].from_me, true);
+  assert.equal(store.pending()[0].historical, true);
+  socket.signalRepository.lidMapping.getPNForLID = async () => contact.slice(1) + '@s.whatsapp.net';
+  await mirror.retryPending();
+  assert.equal(store.events()[2].historical, true);
+  assert.ok(mirror.status().history_received_at);
+});
+
+test('on-demand history is throttled, continues from older received messages and can restart from recent ones', async t => {
+  const { mirror, store, sockets, advance } = lifecycle(t);
+  mirror.connect();
+  const socket = sockets[0];
+  socket.ev.emit('connection.update', { connection: 'open' });
+  await mirror.eventsTail;
+  const requests = [];
+  socket.fetchMessageHistory = async (...args) => { requests.push(args); return 'request'; };
+  const input = { phone: contact, external_id: 'latest', from_me: false, at: 1_800_000_000 };
+  assert.equal((await mirror.requestHistory(input)).state, 'requested');
+  assert.equal((await mirror.requestHistory(input)).state, 'waiting');
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0][0], 50);
+  assert.equal(requests[0][2], input.at);
+  socket.ev.emit('messaging-history.set', { messages: [{
+    key: { id: 'older', remoteJid: contact.slice(1) + '@s.whatsapp.net', fromMe: true },
+    message: { conversation: 'old reply' }, messageTimestamp: 1_790_000_000,
+  }] });
+  await mirror.eventsTail;
+  advance(60_001);
+  await mirror.requestHistory(input);
+  assert.equal(requests[1][1].id, 'older');
+  assert.equal(requests[1][1].fromMe, true);
+  assert.equal(requests[1][2], 1_790_000_000);
+  assert.equal(store.get(`history:${contact}`).cursor.key.id, 'older');
+  advance(60_001);
+  await mirror.requestHistory({ ...input, restart: true });
+  assert.equal(requests[2][1].id, 'latest');
+  mirror.state = 'disconnected';
+  assert.equal((await mirror.requestHistory(input)).state, 'offline');
+  assert.equal(requests.length, 3);
+});
+
 test('expired handshake reconnects once without discarding credentials or queued events', async t => {
   t.mock.timers.enable({ apis: ['setTimeout'] });
   const { mirror, store, sockets, advance } = lifecycle(t);

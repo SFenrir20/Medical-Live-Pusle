@@ -88,6 +88,8 @@ def validate_event(event):
         if event.get('clock', 'observed') not in ('provider', 'observed'):
             raise MirrorEventError('invalid_receipt_clock')
     elif event.get('type') == 'message':
+        if not isinstance(event.get('historical', False), bool):
+            raise MirrorEventError('invalid_history_flag')
         if not isinstance(event.get('from_me'), bool):
             raise MirrorEventError('invalid_message_direction')
         body = event.get('body')
@@ -169,6 +171,8 @@ async def apply_receipt(session, message):
 
 async def after_send(session, message):
     """A message was confirmed (or seen) as sent: count the contact, then let the rules listen."""
+    if message.historical:
+        return
     await record_contact(session, message)
     if message.direction == 'out' and message.status in ('sent', 'delivered', 'read'):
         conversation = await session.get(ChatConversation, message.conversation_id)
@@ -233,10 +237,12 @@ async def ingest(session, event):
                 direction='out' if event['from_me'] else 'in',
                 author_kind='system' if event['from_me'] else 'contact',
                 body=event['body'], status='sent' if event['from_me'] else 'received',
-                created_at=at, observed_at=now(), external_id=external_id)
+                created_at=at, observed_at=now(), external_id=external_id,
+                historical=event.get('historical', False))
             session.add(message)
             if not event['from_me']:
-                conversation.unread += 1
+                if not event.get('historical', False):
+                    conversation.unread += 1
                 if not conversation.last_inbound_at or at > aware(conversation.last_inbound_at):
                     conversation.last_inbound_at = at
         message.external_id = external_id
@@ -256,7 +262,8 @@ async def ingest(session, event):
             conversation.last_message_at = at
         await session.flush()
         await apply_receipt(session, message)
-        await after_send(session, message)
+        if not event.get('historical', False):
+            await after_send(session, message)
     else:
         raise MirrorEventError('unknown_event_type')
     session.add(MirrorEvent(id=event['id']))
