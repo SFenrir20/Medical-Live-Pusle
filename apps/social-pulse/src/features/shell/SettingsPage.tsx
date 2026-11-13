@@ -1,4 +1,5 @@
 import { SitesSettings } from "@/features/sites/SitesSettings";
+import { WhatsAppConnection } from "@/features/integrations/WhatsAppConnection";
 import { useAuth } from "@/context/AuthContext";
 import { AppNav } from "./AppNav";
 
@@ -34,6 +35,7 @@ export function SettingsPage() {
             </div>
           </section>
         )}
+        {user?.permissions.includes("wa:manage") && <WhatsAppConnection />}
         {user?.permissions.includes("sites:manage") && <SitesSettings />}
       </main>
     </div>

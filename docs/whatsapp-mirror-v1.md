@@ -68,9 +68,16 @@ El dominio sigue apuntando a `web:80`. **No publicar el puerto 3001**. El volume
 conserva la sesión, eventos pendientes y claves de idempotencia entre recreaciones del contenedor.
 Mantener una sola instancia de `wa-gateway` y de `wa-worker` por sesión. No escalar estos servicios.
 
+Al arrancar, el gateway recupera automáticamente las credenciales guardadas, incluida la identidad
+`creds.me.id` de una vinculación por QR (Baileys puede mantener `registered=false` en ese caso).
+No es necesario pulsar el botón tras cada reinicio si la sesión sigue siendo válida. Un volumen
+nuevo o una sesión revocada por WhatsApp requieren vinculación; esta comprobación no evita el QR.
+Para aplicar la corrección de recuperación hay que reconstruir `wa-gateway`, conservando el volumen
+y la misma `WA_SESSION_KEY`; reiniciar una imagen antigua no incorpora el cambio.
+
 ## Vinculación y verificación real
 
-1. Ingresar a Social Pulse con rol supervisor/admin; abrir **WhatsApp**.
+1. Ingresar a Social Pulse con rol supervisor/admin; abrir **Ajustes → Conexión de WhatsApp**.
 2. Pulsar **Vincular / reconectar**. En el teléfono empresarial que quieres vincular: WhatsApp →
    Dispositivos vinculados → Vincular dispositivo → escanear el QR.
 3. Comprobar **Conectado**, el número detectado y que no aparezca una alerta de sincronización
