@@ -111,6 +111,29 @@ async def test_a_booking_moves_tags_and_hands_over_the_patient(world):
     assert 'asignada a' in log['items'][0]['summary']
 
 
+async def test_booking_adds_global_citas_and_branch_and_undo_restores_both(world):
+    client, factory = world
+    async with factory() as s, s.begin():
+        pipeline = cm.Pipeline(name='Citas', auto_qualified=True)
+        s.add(pipeline)
+        await s.flush()
+        pid = pipeline.id
+        s.add(cm.PipelineStage(pipeline_id=pid, name='Cita', position=0))
+    conversation = await book(client, factory, '+51900000001')
+    async with factory() as s:
+        cards = (await s.scalars(select(cm.PipelineCard).where(
+            cm.PipelineCard.conversation_id == conversation))).all()
+        assert len(cards) == 2 and pid in {card.pipeline_id for card in cards}
+        log_row = await s.scalar(select(cm.AutoLog).where(cm.AutoLog.conversation_id == conversation))
+        log_id = log_row.id
+    result = await client.post(f'{CRM}/automation/{log_id}/undo', headers=auth('sup'))
+    assert result.status_code == 200, result.text
+    async with factory() as s:
+        assert (await s.scalars(select(cm.PipelineCard).where(
+            cm.PipelineCard.conversation_id == conversation))).all() == []
+        assert (await s.get(ChatConversation, conversation)).stage == 'new'
+
+
 async def test_the_advisor_is_chosen_by_the_shift_that_covers_the_hour(world):
     client, factory = world
     morning = await book(client, factory, '+51900000001', hour='9:30am')     # only ase1 (09-17)

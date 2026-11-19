@@ -190,3 +190,53 @@ sistema de la clínica avisa de la llegada.
 
 Despliegue: reconstruir `api`, **`wa-worker`** (ahí corre la regla) y `web`; la migración 0021 corre sola.
 Asignar el rol `asesor` en Clerk y configurar sede y horario de cada uno en Ajustes.
+
+## Acceso por usuario a embudos (0023)
+
+**Ajustes → Acceso a embudos** está disponible únicamente para `admin`, `gerente` (manager) y
+`jefe_marketing` (marketing), mediante el permiso `pipelines:access_manage`. Supervisor, agente y
+asesor no pueden consultar ni modificar esta configuración. El nombre de usuario «admin» no
+concede permisos: se utiliza el rol efectivo validado por el backend.
+
+Seleccionar un embudo y elegir **Todos según rol y sede** o **Solo usuarios seleccionados**.
+En la lista se muestran nombre, último rol conocido, embudos visibles guardados y acceso al embudo
+seleccionado. Marcar/desmarcar usuarios y pulsar **Guardar accesos**. Si falta una persona, debe
+iniciar sesión una vez para aparecer en el directorio. Las sesiones actuales siguen siendo la fuente
+de autoridad del rol; el directorio solo sirve para presentar y seleccionar usuarios.
+
+- Los embudos existentes y nuevos conservan las reglas habituales por defecto (`allowed_user_ids=NULL`).
+- Una lista vacía oculta el embudo a todos salvo los tres roles que administran estos accesos.
+  Estos roles siempre pueden abrir los embudos, para evitar bloquear su administración.
+- La selección individual restringe; no otorga acceso a otra sede ni a conversaciones ajenas.
+  Las restricciones por contacto/asignación permanecen independientes de la visibilidad del embudo.
+- También se puede restringir **Contactos**. El selector, tableros, paginación, métricas, edición de
+  etapas, movimientos de tarjetas y ficha de embudos del contacto verifican la misma regla en la API.
+- La pantalla actualiza el selector cada 15 segundos al estar visible y limpia un tablero cuando
+  el servidor rechaza su acceso. Sin embudos permitidos muestra un estado vacío, sin cargar indefinidamente.
+- Cada guardado registra actor, fecha y revisión. Si dos administradores editan a la vez, la API
+  rechaza una revisión antigua con 409; actualizar la lista antes de volver a guardar.
+
+Despliegue: reconstruir backend/API y workers que consultan los embudos, y `web`; aplicar la migración
+`0023` (dependiente de `0022`). No requiere cambios en el gateway de WhatsApp. Recargar Social Pulse
+para obtener el nuevo permiso en el perfil del usuario.
+## Ingreso automático al embudo de citas
+
+En Configuración de un embudo general, «Recibir automáticamente contactos con cita
+agendada» incorpora los contactos cuyo estado es `qualified` a la primera etapa.
+Al activarlo también se incorporan los existentes. El chat es el mismo: conserva su
+responsable, historial y estado en Contactos. Una tarjeta que ya está en el destino
+conserva su etapa y valor, aunque se vuelva a marcar la cita o se guarde la regla.
+Desactivar la regla no elimina tarjetas; archivar el embudo detiene nuevas entradas.
+Reordenar etapas cambia el destino de las próximas entradas a la nueva primera etapa.
+Los embudos de sede mantienen su regla independiente de asignación por sede.
+
+La migración `0024` activa esta regla para el embudo general existente llamado Citas
+si hay uno solo activo y su primera etapa se llama Cita. Incorpora las citas actuales
+y registra su ingreso con actor `system:qualified`. Si hay nombres ambiguos, se
+debe activar explícitamente en Configuración. Después se puede renombrar el embudo
+sin perder la regla. Deben actualizarse API, workers Python y frontend, aplicando
+`alembic upgrade head` antes de iniciar los procesos con los nuevos modelos.
+
+Cotizado, Separado y Operado siguen siendo cambios manuales hasta integrar una
+fuente verificable de LOLCLI (API, consulta autorizada o exportación). No se infieren
+pagos ni operaciones a partir de mensajes o del tiempo transcurrido.

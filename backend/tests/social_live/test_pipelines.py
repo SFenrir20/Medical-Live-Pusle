@@ -11,6 +11,7 @@ from livepulse.modules.analytics.models import UserRole
 from livepulse.modules.crm import models as cm
 from livepulse.modules.whatsapp import service as wa
 from livepulse.shared import auth as clerk
+from livepulse.shared.config import settings
 
 INGEST = {'Authorization': 'Bearer ingest-secret'}
 API, WA, CRM = '/api/social-live', '/api/whatsapp', '/api/crm'
@@ -92,6 +93,79 @@ async def make_funnel(client, template='whatsapp', name='Comercial', user='sup')
     r = await client.post(PIPES, headers=auth(user), json={'name': name, 'template': template})
     assert r.status_code == 201, r.text
     return r.json()
+
+
+async def test_qualified_rule_backfills_and_never_resets_advanced_cards(world):
+    client, factory = world
+    chat = await open_chat(client, CHAT_PHONE)
+    await claim(client, chat)
+    assert (await client.patch(f'{CRM}/conversations/{chat}', headers=auth('ana'),
+                               json={'stage': 'qualified'})).status_code == 200
+    funnel = await make_funnel(client, name='Citas')
+    pid = funnel['id']
+    first, second = [s['id'] for s in funnel['stages'][:2]]
+    denied = await client.patch(f'{PIPES}/{pid}', headers=auth('ana'), json={'auto_qualified': True})
+    assert denied.status_code == 403
+    enabled = await client.patch(f'{PIPES}/{pid}', headers=auth('sup'), json={'auto_qualified': True})
+    assert enabled.status_code == 200 and enabled.json()['auto_qualified']
+    board = (await client.get(f'{PIPES}/{pid}/board', headers=auth('sup'))).json()
+    assert board['stages'][0]['cards'][0]['id'] == chat
+    await client.put(f'{PIPES}/{pid}/cards/{chat}', headers=auth('ana'),
+                     json={'stage_id': second, 'value_cents': 50000})
+    # Retry, rename and a repeated qualification may not regress an existing membership.
+    await client.patch(f'{PIPES}/{pid}', headers=auth('sup'),
+                       json={'auto_qualified': True, 'name': 'Seguimiento clínico'})
+    await client.patch(f'{CRM}/conversations/{chat}', headers=auth('ana'), json={'stage': 'qualified'})
+    async with factory() as s:
+        cards = (await s.scalars(select(cm.PipelineCard).where(cm.PipelineCard.pipeline_id == pid))).all()
+        assert len(cards) == 1 and cards[0].stage_id == second and cards[0].value_cents == 50000
+        events = (await s.scalars(select(cm.PipelineEvent).where(
+            cm.PipelineEvent.pipeline_id == pid, cm.PipelineEvent.actor_id == 'system:qualified'))).all()
+        assert len(events) == 1 and events[0].to_stage_id == first
+    # New qualifications route as well, using the stable configuration after renaming.
+    live_chat = await open_chat(client, LIVE_PHONE)
+    await claim(client, live_chat)
+    await client.patch(f'{CRM}/conversations/{live_chat}', headers=auth('ana'), json={'stage': 'qualified'})
+    board = (await client.get(f'{PIPES}/{pid}/board', headers=auth('sup'))).json()
+    assert board['total'] == 2 and board['stages'][0]['cards'][0]['id'] == live_chat
+    await client.patch(f'{PIPES}/{pid}', headers=auth('sup'), json={'auto_qualified': False})
+    extra = await open_chat(client, '+51900000002')
+    await claim(client, extra)
+    await client.patch(f'{CRM}/conversations/{extra}', headers=auth('ana'), json={'stage': 'qualified'})
+    board = (await client.get(f'{PIPES}/{pid}/board', headers=auth('sup'))).json()
+    assert board['total'] == 2
+
+
+async def test_qualified_live_contact_routes_before_or_after_chat_creation(world):
+    from livepulse.modules.social_live import contacts
+    from livepulse.modules.social_live.models import PhoneRegistry
+
+    client, factory = world
+    funnel = await make_funnel(client, name='Citas')
+    pid = funnel['id']
+    await client.patch(f'{PIPES}/{pid}', headers=auth('sup'), json={'auto_qualified': True})
+    async with factory() as s, s.begin():
+        registry = await s.scalar(select(PhoneRegistry).where(PhoneRegistry.phone == LIVE_PHONE))
+        await contacts.set_status(s, registry.id, 'ana', 'qualified')
+    chat = await open_chat(client, LIVE_PHONE)
+    board = (await client.get(f'{PIPES}/{pid}/board', headers=auth('sup'))).json()
+    assert board['total'] == 1 and board['stages'][0]['cards'][0]['id'] == chat
+    # The independent LIVE inbox status workflow also triggers routing for an existing chat.
+    await client.delete(f'{PIPES}/{pid}/cards/{chat}', headers=auth('sup'))
+    async with factory() as s, s.begin():
+        registry = await s.scalar(select(PhoneRegistry).where(PhoneRegistry.phone == LIVE_PHONE))
+        await contacts.set_status(s, registry.id, 'ana', 'contacted')
+        await contacts.set_status(s, registry.id, 'ana', 'qualified')
+    board = (await client.get(f'{PIPES}/{pid}/board', headers=auth('sup'))).json()
+    assert board['total'] == 1
+    # Archiving stops future automatic entries, without deleting existing data.
+    await client.patch(f'{PIPES}/{pid}', headers=auth('sup'), json={'archived': True})
+    extra = await open_chat(client, CHAT_PHONE)
+    await claim(client, extra)
+    await client.patch(f'{CRM}/conversations/{extra}', headers=auth('ana'), json={'stage': 'qualified'})
+    async with factory() as s:
+        cards = (await s.scalars(select(cm.PipelineCard).where(cm.PipelineCard.pipeline_id == pid))).all()
+        assert len(cards) == 1
 
 
 async def test_the_built_in_funnel_mirrors_the_contact_status(world):
@@ -295,3 +369,95 @@ async def test_an_archived_funnel_disappears_and_its_conversations_stay(world):
     assert (await client.get(f'{PIPES}/{funnel["id"]}/board', headers=auth('sup'))).status_code == 404
     async with factory() as s:
         assert len((await s.scalars(select(cm.PipelineCard))).all()) == 1
+
+
+async def test_access_settings_only_admin_manager_and_marketing(world, monkeypatch):
+    client, factory = world
+    monkeypatch.setitem(ROLES, 'boss', 'supervisor')
+    monkeypatch.setitem(ROLES, 'manager', 'gerente')
+    monkeypatch.setattr(settings, 'admin_user_ids', ['boss'])
+    pid, _ = await default_funnel(client)
+    revision = 0
+    for user in ('boss', 'manager', 'jefa'):
+        response = await client.get(f'{PIPES}/access', headers=auth(user))
+        assert response.status_code == 200, response.text
+        assert next(u for u in response.json()['users'] if u['id'] == user)['manages_access']
+        saved = await client.put(f'{PIPES}/{pid}/access', headers=auth(user),
+                                 json={'revision': revision, 'allowed_user_ids': []})
+        assert saved.status_code == 200, saved.text
+        revision = saved.json()['revision']
+        assert saved.json()['updated_by'] == user
+        assert (await client.get(f'{PIPES}/{pid}/board', headers=auth(user))).status_code == 200
+    for user in ('ana', 'bea', 'sup'):
+        assert (await client.get(f'{PIPES}/access', headers=auth(user))).status_code == 403
+        assert (await client.put(f'{PIPES}/{pid}/access', headers=auth(user), json={
+            'revision': revision, 'allowed_user_ids': None})).status_code == 403
+    assert (await client.get(f'{PIPES}/access')).status_code == 401
+    # The directory cannot grant management access instead of the signed Clerk role.
+    async with factory() as s, s.begin():
+        row = await s.get(UserRole, 'ana')
+        row.role = 'gerente'
+    assert (await client.get(f'{PIPES}/access', headers=auth('ana'))).status_code == 403
+
+
+async def test_restricted_funnels_enforced_on_every_route(world):
+    client, _ = world
+    pid, _ = await default_funnel(client)
+    funnel = await make_funnel(client)
+    fid, sid = funnel['id'], funnel['stages'][0]['id']
+    chat = await open_chat(client, CHAT_PHONE)
+    await claim(client, chat)
+    await client.put(f'{PIPES}/{fid}/cards/{chat}', headers=auth('ana'), json={'stage_id': sid})
+    saved = await client.put(f'{PIPES}/{fid}/access', headers=auth('jefa'),
+                             json={'revision': 0, 'allowed_user_ids': ['ana']})
+    assert saved.status_code == 200, saved.text
+    assert (await client.get(f'{PIPES}/{fid}/board', headers=auth('ana'))).status_code == 200
+    for user in ('bea', 'sup'):
+        listed = (await client.get(PIPES, headers=auth(user))).json()['items']
+        assert fid not in {p['id'] for p in listed}
+        for path in (f'/{fid}/board', f'/{fid}/metrics', f'/{fid}/stages/{sid}/cards'):
+            assert (await client.get(PIPES + path, headers=auth(user))).status_code == 404
+        assert (await client.put(f'{PIPES}/{fid}/cards/{chat}', headers=auth(user),
+                                 json={'stage_id': sid})).status_code == 404
+        assert (await client.delete(f'{PIPES}/{fid}/cards/{chat}', headers=auth(user))).status_code == 404
+    assert (await client.patch(f'{PIPES}/{fid}', headers=auth('sup'), json={'name': 'Bypass'})).status_code == 404
+    assert (await client.put(f'{PIPES}/{fid}/stages', headers=auth('sup'),
+                             json={'stages': [{'name': 'Bypass'}]})).status_code == 404
+    await client.put(f'{PIPES}/{pid}/access', headers=auth('jefa'),
+                     json={'revision': 0, 'allowed_user_ids': []})
+    memberships = (await client.get(f'{PIPES}/by-conversation/{chat}', headers=auth('ana'))).json()['items']
+    assert {p['pipeline_id'] for p in memberships} == {fid}
+    assert (await client.get(f'{PIPES}/{pid}/board', headers=auth('ana'))).status_code == 404
+    assert (await client.put(f'{PIPES}/{fid}/access', headers=auth('jefa'), json={
+        'revision': 0, 'allowed_user_ids': None})).status_code == 409
+    assert (await client.put(f'{PIPES}/{fid}/access', headers=auth('jefa'), json={
+        'revision': 1, 'allowed_user_ids': ['unknown']})).status_code == 422
+    assert (await client.get(f'{PIPES}/{fid}/board', headers=auth('bea'))).status_code == 404
+    assert (await client.put(f'{PIPES}/{fid}/access', headers=auth('jefa'), json={
+        'revision': 1, 'allowed_user_ids': None})).status_code == 200
+    # Allowing a funnel does not expose somebody else's conversation.
+    response = await client.get(f'{PIPES}/{fid}/board', headers=auth('bea'))
+    assert response.status_code == 200 and response.json()['total'] == 0
+
+
+async def test_allowlist_preserves_branch_restrictions_and_overview_matches_access(world):
+    client, factory = world
+    fid = (await make_funnel(client))['id']
+    async with factory() as s, s.begin():
+        site = cm.Site(key='test-lince', name='Lince')
+        s.add(site)
+        await s.flush()
+        pipeline = await s.get(cm.Pipeline, fid)
+        pipeline.site_id = site.id
+        s.add(cm.Staff(user_id='ana', site_id=site.id))
+    await client.put(f'{PIPES}/{fid}/access', headers=auth('jefa'),
+                     json={'revision': 0, 'allowed_user_ids': ['ana', 'bea']})
+    overview = (await client.get(f'{PIPES}/access', headers=auth('jefa'))).json()
+    users = {u['id']: u for u in overview['users']}
+    assert fid in users['ana']['eligible_ids'] and fid in users['ana']['visible_ids']
+    assert fid not in users['bea']['eligible_ids'] and fid not in users['bea']['visible_ids']
+    assert (await client.get(f'{PIPES}/{fid}/board', headers=auth('bea'))).status_code == 404
+    assert (await client.get(f'{PIPES}/{fid}/board', headers=auth('ana'))).status_code == 200
+    await client.put(f'{PIPES}/{fid}/access', headers=auth('jefa'),
+                     json={'revision': 1, 'allowed_user_ids': []})
+    assert (await client.get(f'{PIPES}/{fid}/board', headers=auth('ana'))).status_code == 404

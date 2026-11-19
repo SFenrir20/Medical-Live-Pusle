@@ -90,6 +90,9 @@ async def get_conversation(session, channel_id: str, phone: str, name: str | Non
     except IntegrityError:  # created at the same time by another request
         row = await session.scalar(select(ChatConversation).where(
             ChatConversation.channel_id == channel_id, ChatConversation.phone == phone))
+    if contact is not None and contact.status == 'qualified':
+        from ..crm.funnels import enter_qualified
+        await enter_qualified(session, row.id)
     return row
 
 

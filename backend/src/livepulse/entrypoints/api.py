@@ -18,6 +18,7 @@ from ..modules.social_live.distribution import router as presence_router
 from ..modules.social_live.leads import router as leads_router
 from ..modules.tiktok_oauth.api import router as tiktok_oauth_router
 from ..modules.whatsapp.api import router as whatsapp_router
+from ..modules.whatsapp.cloud import router as whatsapp_cloud_router
 from ..shared.auth import get_current_user
 from ..shared.config import settings
 
@@ -34,6 +35,7 @@ app.include_router(audience_router)
 app.include_router(presence_router)
 app.include_router(chat_router)
 app.include_router(whatsapp_router)
+app.include_router(whatsapp_cloud_router)
 app.include_router(crm_router)
 app.include_router(pipelines_router)
 app.include_router(sites_router)

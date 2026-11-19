@@ -94,4 +94,13 @@ async def set_status(session, registry_id: int, actor: str, status: str, *,
     previous = row.status
     await _apply(session, row, values)
     await audit(session, row.id, actor, 'status', previous, status)
+    if status == 'qualified':
+        from sqlalchemy import select
+
+        from ..chat.models import ChatConversation
+        from ..crm.funnels import enter_qualified
+
+        for conversation_id in (await session.scalars(select(ChatConversation.id).where(
+                ChatConversation.phone == row.phone))).all():
+            await enter_qualified(session, conversation_id)
     return row

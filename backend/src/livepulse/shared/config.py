@@ -45,6 +45,10 @@ class Settings(BaseSettings):
     bot_pause_hours: int = 6
     # Private Docker service; never expose this token or URL to the browser.
     wa_gateway_url: str = ""
+    # WhatsApp Cloud API (official, Meta). Empty = the webhook answers 503 and accepts nothing.
+    wa_cloud_verify_token: str = ""
+    wa_cloud_app_secret: str = ""
+    wa_cloud_phone_number_id: str = ""
     wa_gateway_token: str = ""
     cors_origins: list[str] = []
     # Captura TikTok: account_id interno -> usuario TikTok (sin @).

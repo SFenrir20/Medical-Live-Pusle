@@ -93,6 +93,11 @@ class Pipeline(Base):
     position = Column(Integer, nullable=False, server_default='0')
     archived = Column(Boolean, nullable=False, server_default=text('false'))
     site_id = Column(PK_BIG)                              # funnel of one branch (its advisors)
+    auto_qualified = Column(Boolean, nullable=False, server_default=text('false'))
+    allowed_user_ids = Column(JSON)                       # NULL = existing access rules; [] = managers only
+    access_revision = Column(Integer, nullable=False, server_default='0')
+    access_updated_by = Column(String(255))
+    access_updated_at = Column(DateTime(timezone=True))
     created_by = Column(String(255))
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
