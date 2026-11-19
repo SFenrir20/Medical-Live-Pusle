@@ -27,23 +27,26 @@ const draftOf = (s: FunnelStage): StageDraft => ({
  *  The built-in funnel only shows its numbers: it mirrors the contact status. */
 export function FunnelBuilder({
   funnel,
+  canEdit = false,
   stages,
   onClose,
   onSaved,
   onArchived,
 }: {
   funnel: Funnel;
+  canEdit?: boolean;
   stages: FunnelStage[];
   onClose: () => void;
   onSaved: () => void;
   onArchived: () => void;
 }) {
   const [name, setName] = useState(funnel.name);
+  const [autoQualified, setAutoQualified] = useState(!!funnel.auto_qualified);
   const [drafts, setDrafts] = useState<StageDraft[]>(() => stages.map(draftOf));
   const [metrics, setMetrics] = useState<Record<number, StageMetric>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const locked = funnel.default;
+  const locked = funnel.default || !canEdit;
 
   useEffect(() => {
     let stopped = false;
@@ -92,12 +95,14 @@ export function FunnelBuilder({
     setBusy(true);
     setError("");
     try {
-      if (name.trim() && name.trim() !== funnel.name)
-        await funnelApi.patch(funnel.id, { name: name.trim() });
       await funnelApi.saveStages(
         funnel.id,
         drafts.map((d) => ({ ...d, name: d.name.trim(), description: d.description.trim() })),
       );
+      await funnelApi.patch(funnel.id, {
+        name: name.trim() || funnel.name,
+        ...(!funnel.site_id ? { auto_qualified: autoQualified } : {}),
+      });
       onSaved();
     } catch (e) {
       setError(problem(e));
@@ -125,14 +130,16 @@ export function FunnelBuilder({
     </div>
   );
   return (
-    <Modal title={locked ? "Embudo «Contactos»" : "Configurar embudo"} onClose={onClose} wide>
+    <Modal title={locked ? `Embudo «${funnel.name}»` : "Configurar embudo"} onClose={onClose} wide>
       <div className="space-y-5">
-        {locked ? (
+        {funnel.default ? (
           <p className="rounded-xl bg-primary-soft p-3 text-sm text-primary">
             Este embudo refleja el estado de cada contacto (Nuevo, Contactado, Cita agendada,
             Descartado) y es el mismo que ves en la bandeja. No se edita; para flujos propios, crea
             otro embudo.
           </p>
+        ) : locked ? (
+          <p className="text-sm text-muted">Puedes consultar las etapas y cifras de este embudo.</p>
         ) : (
           <label className="block text-sm font-semibold">
             Nombre del embudo
@@ -143,6 +150,22 @@ export function FunnelBuilder({
               className="mt-1 w-full rounded-xl border border-line px-3 py-2 text-sm font-normal outline-none focus:border-primary"
             />
           </label>
+        )}
+
+        {!locked && !funnel.site_id && (
+          <div className="rounded-xl border border-line bg-primary-soft p-3 text-sm">
+            <label className="flex items-start gap-2 font-semibold">
+              <input type="checkbox" checked={autoQualified}
+                onChange={(e) => setAutoQualified(e.target.checked)} className="mt-1" />
+              Recibir automáticamente contactos con cita agendada
+            </label>
+            <p className="mt-2 text-xs text-muted">
+              Al guardar, los actuales y los próximos contactos con «Cita agendada» ingresan en
+              «{drafts[0]?.name || "la primera etapa"}». Conservan su chat y su estado en Contactos.
+              Quienes ya están en este embudo mantienen su etapa y valor.
+              Desactivar esta regla no retira los contactos existentes.
+            </p>
+          </div>
         )}
 
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">

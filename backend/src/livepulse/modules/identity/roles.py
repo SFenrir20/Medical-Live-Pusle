@@ -27,14 +27,14 @@ PERMISSIONS: dict[str, set[str]] = {
     'agente_ventas': {'screen:agent', *CONTACT_WORK, *WA_WORK},
     # Advisors of a branch: take over the patients the appointments centre booked for their branch.
     'asesor': {'screen:agent', *CONTACT_WORK, *WA_WORK},
-    'gerente': {*MARKETING, *WA_REVIEW},
-    'jefe_marketing': {*MARKETING, *WA_REVIEW},
+    'gerente': {*MARKETING, *WA_REVIEW, 'pipelines:access_manage'},
+    'jefe_marketing': {*MARKETING, *WA_REVIEW, 'pipelines:access_manage'},
     # Both screens plus the operational view, to diagnose failures.
     'supervisor': {'screen:agent', *MARKETING, 'monitor', *CONTACT_MANAGE, *WA_WORK, *WA_REVIEW, 'wa:manage',
                    'crm:manage'},
     # Break-glass owner (ADMIN_USER_IDS) in case Clerk metadata is misconfigured.
     'admin': {'screen:agent', *MARKETING, 'monitor', *CONTACT_MANAGE, 'automation:manage', *WA_WORK, *WA_REVIEW, 'wa:manage',
-              'crm:manage', 'sites:manage'},
+              'crm:manage', 'sites:manage', 'pipelines:access_manage'},
 }
 
 

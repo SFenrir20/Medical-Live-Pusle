@@ -2,7 +2,7 @@ import apiClient from "@/services/api";
 import type { ConversationItem } from "@/features/chats/api";
 
 /** Funnels (embudos) of the CRM: /api/crm/pipelines. The server decides who may move or edit. */
-export type Funnel = { id: number; name: string; default: boolean; site_id?: number | null };
+export type Funnel = { id: number; name: string; default: boolean; site_id?: number | null; auto_qualified?: boolean };
 export type FunnelStage = {
   id: number;
   name: string;
@@ -28,11 +28,12 @@ const get = async <T>(url: string, params?: object) =>
   (await apiClient.get<T>(url, { params })).data;
 
 export const funnelApi = {
-  list: () => get<{ items: Funnel[] }>("/crm/pipelines").then((r) => r.items),
+  list: async (signal?: AbortSignal) =>
+    (await apiClient.get<{ items: Funnel[] }>("/crm/pipelines", { signal })).data.items,
   templates: () => get<{ items: Template[] }>("/crm/pipelines/templates").then((r) => r.items),
   create: async (name: string, template: string) =>
     (await apiClient.post<FunnelDetail>("/crm/pipelines", { name, template })).data,
-  patch: async (id: number, body: { name?: string; archived?: boolean }) =>
+  patch: async (id: number, body: { name?: string; archived?: boolean; auto_qualified?: boolean }) =>
     (await apiClient.patch<FunnelDetail>(`/crm/pipelines/${id}`, body)).data,
   saveStages: async (id: number, stages: StageDraft[]) =>
     (await apiClient.put<FunnelDetail>(`/crm/pipelines/${id}/stages`, { stages })).data,

@@ -45,11 +45,11 @@ async def registry_of(session, conversation):
         PhoneRegistry.phone == conversation.phone).with_for_update())
 
 
-async def set_stage(session, conversation, registry, stage: str) -> None:
+async def set_stage(session, conversation, registry, stage: str) -> list[int]:
     """The contact's own stage (a LIVE contact keeps it on the contact, with its audit)."""
     before = stage_of(conversation, registry)
     if before == stage:
-        return
+        return await funnels.record_contact_stage(session, conversation.id, before, stage, SYSTEM)
     if registry:
         values = {'status': stage}
         if stage in workflow.CONTACTED and registry.contacted_at is None:
@@ -58,7 +58,7 @@ async def set_stage(session, conversation, registry, stage: str) -> None:
         await audit(session, registry.id, SYSTEM, 'status', before, stage)
     else:
         conversation.stage = stage
-    await funnels.record_contact_stage(session, conversation.id, before, stage, SYSTEM)
+    return await funnels.record_contact_stage(session, conversation.id, before, stage, SYSTEM)
 
 
 async def set_owner(session, conversation, registry, advisor_id) -> None:
@@ -99,7 +99,8 @@ async def on_outbound(session, conversation, message) -> None:
               'appointment_label': conversation.appointment_label, 'cards': []}
     steps = []
 
-    await set_stage(session, conversation, registry, QUALIFIED)
+    created_pipelines = await set_stage(session, conversation, registry, QUALIFIED)
+    before['cards'].extend({'pipeline_id': pid, 'created': True} for pid in created_pipelines)
     steps.append('cita agendada')
     tags = set(conversation.tags or []) | {'Cita agendada'}
     if registry:

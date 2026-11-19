@@ -14,6 +14,7 @@ import { useAuth } from "@/context/AuthContext";
 import { AppNav } from "@/features/shell/AppNav";
 import { chatApi, type ConversationItem, type LiveLead, problem } from "@/features/chats/api";
 import { ConversationDialog } from "@/features/chats/ConversationDialog";
+import { pollVisible } from "@/features/chats/polling";
 import { LivePanel } from "@/features/chats/LivePanel";
 import {
   type Board,
@@ -119,6 +120,7 @@ export function PipelinesPage() {
   const mayManage = permissions.includes("crm:manage");
 
   const [funnels, setFunnels] = useState<Funnel[]>([]);
+  const [funnelsLoaded, setFunnelsLoaded] = useState(false);
   const [current, setCurrent] = useState<number | null>(null);
   const [board, setBoard] = useState<Board | null>(null);
   const [templates, setTemplates] = useState<Template[]>([]);
@@ -144,9 +146,12 @@ export function PipelinesPage() {
     return () => clearTimeout(timer);
   }, [search]);
 
-  const loadFunnels = useCallback(async (prefer?: number) => {
-    const items = await funnelApi.list();
+  const loadFunnels = useCallback(async (prefer?: number, signal?: AbortSignal) => {
+    const items = await funnelApi.list(signal);
+    if (signal?.aborted) return;
     setFunnels(items);
+    setFunnelsLoaded(true);
+    setBoard((old) => (old && items.some((p) => p.id === old.pipeline.id) ? old : null));
     setCurrent((old) => {
       const wanted = prefer ?? old ?? remembered();
       // Without a choice yet, someone who works at a branch starts in that branch's funnel.
@@ -160,19 +165,34 @@ export function PipelinesPage() {
   }, []);
   useEffect(() => {
     if (!mayRead) return;
-    void loadFunnels().catch((e) => setError(problem(e)));
     void funnelApi
       .templates()
       .then(setTemplates)
       .catch(() => undefined);
+    return pollVisible(
+      (signal) => loadFunnels(undefined, signal),
+      15000,
+      (e) => setError(problem(e)),
+    );
   }, [mayRead, loadFunnels]);
 
   const refresh = useCallback(async () => {
     const id = currentRef.current;
     if (!id) return;
-    const fresh = await funnelApi.board(id, q, mine);
-    if (currentRef.current === id) setBoard((old) => merge(old, fresh, expanded.current));
-  }, [q, mine]);
+    try {
+      const fresh = await funnelApi.board(id, q, mine);
+      if (currentRef.current === id) setBoard((old) => merge(old, fresh, expanded.current));
+    } catch (e) {
+      const code = (e as { response?: { status?: number } }).response?.status;
+      if (currentRef.current === id && (code === 403 || code === 404)) {
+        setBoard(null);
+        setDialog(null);
+        await loadFunnels();
+        return;
+      }
+      throw e;
+    }
+  }, [q, mine, loadFunnels]);
 
   useEffect(() => {
     if (!mayRead || !current) return;
@@ -384,6 +404,11 @@ export function PipelinesPage() {
             <Settings size={14} /> {mayManage && !isDefault ? "Configuración" : "Etapas y cifras"}
           </button>
         )}
+        {funnel?.auto_qualified && (
+          <span className="rounded-lg bg-emerald-50 px-3 py-2 text-xs text-emerald-700">
+            Ingreso automático desde Cita agendada
+          </span>
+        )}
         <div className="ml-auto flex flex-wrap items-center gap-2">
           <label className="relative">
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted" />
@@ -435,7 +460,13 @@ export function PipelinesPage() {
 
       <div className="flex min-h-0 flex-1 gap-3 px-4 pb-4 sm:px-6">
         <main className="flex min-h-0 min-w-0 flex-1 gap-3 overflow-x-auto">
-          {!board && !error && <p className="m-auto text-sm text-muted">Cargando embudo…</p>}
+          {!board && !error && (
+            <p className="m-auto text-sm text-muted">
+              {funnelsLoaded && funnels.length === 0
+                ? "No tienes embudos disponibles. Solicita acceso al administrador."
+                : "Cargando embudo…"}
+            </p>
+          )}
           {stages.map((column) => (
             <section
               key={column.id}
@@ -552,6 +583,7 @@ export function PipelinesPage() {
         <FunnelBuilder
           key={funnel.id}
           funnel={funnel}
+          canEdit={mayManage}
           stages={stages}
           onClose={() => setDialog(null)}
           onSaved={() => {

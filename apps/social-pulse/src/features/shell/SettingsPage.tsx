@@ -1,5 +1,6 @@
 import { SitesSettings } from "@/features/sites/SitesSettings";
 import { WhatsAppConnection } from "@/features/integrations/WhatsAppConnection";
+import { PipelineAccessSettings } from "@/features/pipelines/PipelineAccessSettings";
 import { useAuth } from "@/context/AuthContext";
 import { AppNav } from "./AppNav";
 
@@ -36,6 +37,7 @@ export function SettingsPage() {
           </section>
         )}
         {user?.permissions.includes("wa:manage") && <WhatsAppConnection />}
+        {user?.permissions.includes("pipelines:access_manage") && <PipelineAccessSettings />}
         {user?.permissions.includes("sites:manage") && <SitesSettings />}
       </main>
     </div>

@@ -11,12 +11,15 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field, StringConstraints
-from sqlalchemy import and_, case, func, select, union
+from sqlalchemy import and_, case, func, select, union, update
 
 from ...shared.db import get_session
+from ..analytics.models import UserRole
 from ..chat.models import ChatConversation
 from ..chat.service import utcnow
+from ..identity.roles import permissions_of, role_for
 from ..social_live.models import PhoneRegistry
+from ..social_live.security import require_scope
 from . import funnels, sites
 from .api import (
     build_items,
@@ -36,6 +39,7 @@ router = APIRouter(prefix='/api/crm/pipelines', tags=['crm-pipelines'])
 PAGE = 30
 COLOR = re.compile(r'^#[0-9a-fA-F]{6}$')
 MAX_VALUE = 10 ** 11   # cents
+access_manager = require_scope('pipelines:access_manage')
 
 
 # ---- helpers ---------------------------------------------------------------------------------
@@ -47,14 +51,27 @@ def stage_item(stage: PipelineStage) -> dict:
 
 
 def pipeline_item(pipeline: Pipeline) -> dict:
-    return {'id': pipeline.id, 'name': pipeline.name, 'default': pipeline.key == funnels.DEFAULT_KEY}
+    return {'id': pipeline.id, 'name': pipeline.name, 'default': pipeline.key == funnels.DEFAULT_KEY,
+            'auto_qualified': pipeline.auto_qualified, 'site_id': pipeline.site_id}
 
 
-async def can_see(session, pipeline: Pipeline, who) -> bool:
+async def eligible_for_site(session, pipeline: Pipeline, who) -> bool:
     """The funnel of a branch is seen by that branch's advisors and by who may see everything."""
     if pipeline.site_id is None or 'wa:read_all' in perms(who):
         return True
     return pipeline.site_id in await sites.site_ids_of(session, who['user_id'])
+
+
+async def can_see(session, pipeline: Pipeline, who) -> bool:
+    allowed = perms(who)
+    if 'wa:read' not in allowed:
+        return False
+    # Access administrators keep access so an allowlist cannot lock out its administrators.
+    if 'pipelines:access_manage' in allowed:
+        return True
+    if pipeline.allowed_user_ids is not None and who['user_id'] not in pipeline.allowed_user_ids:
+        return False
+    return await eligible_for_site(session, pipeline, who)
 
 
 async def load(session, pipeline_id: int, who, *, active: bool = True) -> Pipeline:
@@ -120,6 +137,63 @@ async def templates(who=Depends(reader)):
                       for key, value in funnels.TEMPLATES.items()]}
 
 
+def access_item(pipeline):
+    return {**pipeline_item(pipeline), 'site_id': pipeline.site_id,
+            'allowed_user_ids': pipeline.allowed_user_ids, 'revision': pipeline.access_revision,
+            'updated_by': pipeline.access_updated_by, 'updated_at': pipeline.access_updated_at}
+
+
+@router.get('/access')
+async def access_overview(who=Depends(access_manager), session=Depends(get_session)):
+    await funnels.ensure_default(session)
+    pipelines = list((await session.scalars(select(Pipeline).where(Pipeline.archived.is_(False))
+                                          .order_by(Pipeline.position, Pipeline.id))).all())
+    directory = list((await session.scalars(select(UserRole).order_by(UserRole.display_name, UserRole.user_id))).all())
+    # A caller might be authenticated before /auth/me has registered them in the directory.
+    users = {row.user_id: (row.display_name or row.user_id, role_for(row.user_id, row.role)) for row in directory}
+    users[who['user_id']] = (users.get(who['user_id'], (who['user_id'], None))[0], who['role'])
+    result = []
+    for uid, (name, role) in users.items():
+        identity = {'user_id': uid, 'role': role}
+        rights = permissions_of(role)
+        result.append({'id': uid, 'name': name, 'role': role,
+                       'manages_access': 'pipelines:access_manage' in rights,
+                       'eligible_ids': [p.id for p in pipelines if 'wa:read' in rights and
+                                        await eligible_for_site(session, p, identity)],
+                       'visible_ids': [p.id for p in pipelines if await can_see(session, p, identity)]})
+    await session.commit()
+    return {'pipelines': [access_item(p) for p in pipelines], 'users': result}
+
+
+UserId = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=255)]
+
+
+class PipelineAccessIn(BaseModel):
+    allowed_user_ids: list[UserId] | None = Field(default=None, max_length=1000)
+    revision: int = Field(ge=0)
+
+
+@router.put('/{pipeline_id}/access')
+async def save_access(pipeline_id: int, body: PipelineAccessIn,
+                      who=Depends(access_manager), session=Depends(get_session)):
+    pipeline = await load(session, pipeline_id, who)
+    ids = sorted(set(body.allowed_user_ids)) if body.allowed_user_ids is not None else None
+    if ids:
+        known = set((await session.scalars(select(UserRole.user_id).where(UserRole.user_id.in_(ids)))).all())
+        known.add(who['user_id'])
+        if set(ids) - known:
+            raise HTTPException(422, 'Hay usuarios que aún no figuran en el directorio. Actualiza la lista.')
+    result = await session.execute(update(Pipeline).where(
+        Pipeline.id == pipeline.id, Pipeline.access_revision == body.revision).values(
+            allowed_user_ids=ids, access_revision=body.revision + 1,
+            access_updated_by=who['user_id'], access_updated_at=utcnow()))
+    if result.rowcount != 1:
+        raise HTTPException(409, 'Otra persona modificó los accesos. Actualiza la lista antes de guardar.')
+    await session.commit()
+    await session.refresh(pipeline)
+    return access_item(pipeline)
+
+
 class PipelineIn(BaseModel):
     name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=60)]
     template: str = 'blank'
@@ -153,6 +227,7 @@ async def create_pipeline(body: PipelineIn, who=Depends(manager), session=Depend
 class PipelinePatch(BaseModel):
     name: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=60)] | None = None
     archived: bool | None = None
+    auto_qualified: bool | None = None
 
 
 @router.patch('/{pipeline_id}')
@@ -165,6 +240,13 @@ async def patch_pipeline(pipeline_id: int, body: PipelinePatch, who=Depends(mana
         pipeline.name = body.name
     if body.archived is not None:
         pipeline.archived = body.archived
+    if body.auto_qualified is not None:
+        if pipeline.site_id is not None:
+            raise HTTPException(409, 'Los embudos de sede usan la asignación de citas por sede.')
+        pipeline.auto_qualified = body.auto_qualified
+    if pipeline.auto_qualified and not pipeline.archived:
+        await session.flush()
+        await funnels.backfill_qualified(session, pipeline)
     await session.commit()
     return await detail(session, pipeline)
 
@@ -359,6 +441,8 @@ async def of_conversation(conversation_id: int, who=Depends(reader), session=Dep
     items = [{'pipeline_id': default.id, 'name': default.name, 'default': True,
               'stage_id': mapping.get(stage_of(conversation, registry)),
               'value_cents': int(cards[default.id].value_cents) if default.id in cards else 0}]
+    if not await can_see(session, default, who):
+        items = []
     for pipeline in (await session.scalars(select(Pipeline).where(
             Pipeline.archived.is_(False), Pipeline.key.is_(None)).order_by(Pipeline.position))).all():
         if not await can_see(session, pipeline, who):
